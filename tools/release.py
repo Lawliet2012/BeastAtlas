@@ -21,7 +21,7 @@ NAME = "BeastAtlas"
 API = "https://wow.curseforge.com/api"
 # what goes into the game's AddOns/BeastAtlas folder
 PATTERNS = (("", (".toc", ".lua", ".xml")), ("Data", (".lua",)), ("Media", (".tga",)))
-EXTRA = ("README.md", "CHANGELOG.md", "LICENSE")
+EXTRA = ("README.md", "CHANGELOG.md", "LICENSE", "NOTICE.md")
 
 
 def toc(field):

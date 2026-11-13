@@ -89,7 +89,11 @@ def upload(project_id):
         "releaseType": "beta" if version.startswith("0.") else "release",
     }
     print(f"uploading {os.path.basename(path)} to project {project_id}: game versions {versions}, {metadata['releaseType']}")
-    out = curl("-F", "metadata=" + json.dumps(metadata, ensure_ascii=False), "-F", "file=@" + path,
+    # from a file: on a command line curl reads ';' and quotes inside the value as its own syntax
+    meta_path = os.path.join(os.path.dirname(path), "metadata.json")
+    with open(meta_path, "w", encoding="ascii", newline="\n") as f:
+        json.dump(metadata, f, ensure_ascii=True)
+    out = curl("-F", "metadata=<" + meta_path, "-F", "file=@" + path,
                f"{API}/projects/{project_id}/upload-file")
     print("CurseForge answered:", out.strip())
     try:

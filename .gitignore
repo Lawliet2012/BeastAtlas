@@ -1,0 +1,6 @@
+# pages downloaded by tools/build_db.py (third-party content, rebuilt on demand)
+tools/cache/
+# release archives
+dist/
+__pycache__/
+*.pyc

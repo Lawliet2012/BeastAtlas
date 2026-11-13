@@ -1,0 +1,109 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.blizzard.com/wow/ui/ ..\FrameXML\UI.xsd">
+    <!--
+        No XML <Scripts> on purpose: the map canvas (Blizzard_MapCanvas, AcquirePin) calls OnLoad itself,
+        asserts that pins have no OnEnter/OnLeave, and routes the mouse to the mixin's
+        OnMouseEnter / OnMouseLeave / OnMouseClickAction.
+        Textures come from Media\ (tools/make_media.py) and are set and tinted in MapPins.lua.
+    -->
+
+    <!-- Habitat: one soft-edged circle, shown for the beast under the mouse. Size comes from the cluster radius;
+         scales with map zoom. Mouse stays off. -->
+    <Frame name="BeastAtlasAreaPinTemplate" mixin="BeastAtlasAreaPinMixin" virtual="true">
+        <Size x="16" y="16"/>
+        <Layers>
+            <Layer level="BACKGROUND">
+                <Texture parentKey="Fill" setAllPoints="true"/>
+            </Layer>
+        </Layers>
+    </Frame>
+
+    <!-- Beast: round family icon on a dark disc with a status-coloured ring; a count badge for stacks. -->
+    <Frame name="BeastAtlasIconPinTemplate" mixin="BeastAtlasIconPinMixin" enableMouse="true" virtual="true">
+        <Size x="24" y="24"/>
+        <Layers>
+            <Layer level="BACKGROUND">
+                <Texture parentKey="Backdrop">
+                    <Anchors>
+                        <Anchor point="TOPLEFT" x="-2" y="2"/>
+                        <Anchor point="BOTTOMRIGHT" x="2" y="-2"/>
+                    </Anchors>
+                </Texture>
+            </Layer>
+            <Layer level="BORDER">
+                <Texture parentKey="Icon">
+                    <Anchors>
+                        <Anchor point="TOPLEFT" x="3" y="-3"/>
+                        <Anchor point="BOTTOMRIGHT" x="-3" y="3"/>
+                    </Anchors>
+                    <TexCoords left="0.08" right="0.92" top="0.08" bottom="0.92"/>
+                </Texture>
+            </Layer>
+            <Layer level="ARTWORK">
+                <Texture parentKey="Ring" setAllPoints="true"/>
+            </Layer>
+            <Layer level="OVERLAY">
+                <Texture parentKey="Badge">
+                    <Size x="15" y="15"/>
+                    <Anchors>
+                        <Anchor point="CENTER" relativePoint="BOTTOMRIGHT" x="-3" y="3"/>
+                    </Anchors>
+                </Texture>
+            </Layer>
+            <Layer level="OVERLAY" textureSubLevel="1">
+                <FontString parentKey="Count" inherits="NumberFontNormalSmall" justifyH="CENTER">
+                    <Anchors>
+                        <Anchor point="CENTER" relativeKey="$parent.Badge" x="0" y="0"/>
+                    </Anchors>
+                </FontString>
+            </Layer>
+        </Layers>
+    </Frame>
+
+    <!-- Pet trainer NPC: the same shape with a blue ring. -->
+    <Frame name="BeastAtlasTrainerPinTemplate" mixin="BeastAtlasTrainerPinMixin" enableMouse="true" virtual="true">
+        <Size x="22" y="22"/>
+        <Layers>
+            <Layer level="BACKGROUND">
+                <Texture parentKey="Backdrop">
+                    <Anchors>
+                        <Anchor point="TOPLEFT" x="-2" y="2"/>
+                        <Anchor point="BOTTOMRIGHT" x="2" y="-2"/>
+                    </Anchors>
+                </Texture>
+            </Layer>
+            <Layer level="BORDER">
+                <Texture parentKey="Icon">
+                    <Anchors>
+                        <Anchor point="TOPLEFT" x="3" y="-3"/>
+                        <Anchor point="BOTTOMRIGHT" x="-3" y="3"/>
+                    </Anchors>
+                    <TexCoords left="0.08" right="0.92" top="0.08" bottom="0.92"/>
+                </Texture>
+            </Layer>
+            <Layer level="ARTWORK">
+                <Texture parentKey="Ring" setAllPoints="true"/>
+            </Layer>
+        </Layers>
+    </Frame>
+
+    <!-- Continent maps: one summary per zone (dark disc, status ring, count). Constant on-screen size. -->
+    <Frame name="BeastAtlasZonePinTemplate" mixin="BeastAtlasZonePinMixin" enableMouse="true" virtual="true">
+        <Size x="26" y="26"/>
+        <Layers>
+            <Layer level="BACKGROUND">
+                <Texture parentKey="Backdrop" setAllPoints="true"/>
+            </Layer>
+            <Layer level="ARTWORK">
+                <Texture parentKey="Ring" setAllPoints="true"/>
+            </Layer>
+            <Layer level="OVERLAY">
+                <FontString parentKey="Count" inherits="NumberFontNormal" justifyH="CENTER">
+                    <Anchors>
+                        <Anchor point="CENTER" x="0" y="0"/>
+                    </Anchors>
+                </FontString>
+            </Layer>
+        </Layers>
+    </Frame>
+</Ui>

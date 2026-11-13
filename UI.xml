@@ -1,0 +1,20 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.blizzard.com/wow/ui/ ..\FrameXML\UI.xsd">
+    <!--
+        Rows of the atlas lists. The scroll box lays rows out by the height of their template, so each row
+        kind has its own template (the same way the game's trainer window does it); the content is built in UI.lua.
+    -->
+    <Button name="BeastAtlasRowTemplate" virtual="true">
+        <Size x="100" y="32"/>
+    </Button>
+    <Button name="BeastAtlasGroupRowTemplate" virtual="true">
+        <Size x="100" y="24"/>
+    </Button>
+    <Button name="BeastAtlasHeaderRowTemplate" virtual="true">
+        <Size x="100" y="36"/>
+    </Button>
+    <!-- a wrapped paragraph: the list gives every such row the height of its text -->
+    <Button name="BeastAtlasTextRowTemplate" virtual="true">
+        <Size x="100" y="20"/>
+    </Button>
+</Ui>

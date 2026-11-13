@@ -1,0 +1,26 @@
+## Interface: 16001
+## Title: |cffabd473Beast|rAtlas
+## Title-ruRU: |cffabd473Beast|rAtlas — атлас зверей
+## Notes: Hunter helper for WoW Forever: which beasts teach which pet ability ranks, where they live, with 3D models.
+## Notes-ruRU: Помощник охотника для WoW Forever: какие звери учат каким рангам способностей питомца, где они обитают, 3D-модели.
+## Author: Lawliet2012
+## X-License: MIT
+## X-Website: https://github.com/Lawliet2012/BeastAtlas
+## Version: 0.5.1
+## IconTexture: Interface\Icons\Ability_Hunter_BeastTaming
+## SavedVariables: BeastAtlasDB
+## SavedVariablesPerCharacter: BeastAtlasCharDB
+## Category: Hunter
+
+Locale.lua
+Data\Beasts.lua
+Core.lua
+Tracker.lua
+Collect.lua
+Notify.lua
+Helper.lua
+MapPins.lua
+MapPins.xml
+UI.xml
+UI.lua
+Tooltip.lua

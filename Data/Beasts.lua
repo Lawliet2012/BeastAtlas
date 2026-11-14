@@ -2,7 +2,7 @@
 -- Data: Petopia Forever (wow-petopia.com/forever) and Wowhead (wowhead.com/forever).
 local _, ns = ...
 
-ns.DATA_VERSION = { game = "1.60.1", built = "2026-11-13" }
+ns.DATA_VERSION = { game = "1.60.1", built = "2026-11-14" }
 
 -- [familyKey] = { en, ru, icon, role = "O"ffense | "G"eneral | "D"efense (Petopia), diet = { food, ... } }
 ns.FAMILIES = {
@@ -53,10 +53,12 @@ ns.ZONES = {
   ["Hillsbrad Foothills"] = { map = 1424, area = 267 },
   ["Ironforge"] = { map = 1455, area = 1537 },
   ["Loch Modan"] = { map = 1432, area = 38 },
+  ["Mount Hyjal"] = { map = nil, area = 616 },
   ["Mulgore"] = { map = 1412, area = 215 },
   ["Orgrimmar"] = { map = 1454, area = 1637 },
   ["Razorfen Kraul (Dungeon)"] = { map = nil, area = 491 },
   ["Redridge Mountains"] = { map = 1433, area = 44 },
+  ["Riverglades"] = { map = nil, area = 16591 },
   ["Ruins of Lordaeron (Dungeon)"] = { map = nil, area = 16611 },
   ["Scarlet Monastery (Dungeon)"] = { map = nil, area = 796 },
   ["Searing Gorge"] = { map = 1427, area = 51 },
@@ -76,6 +78,7 @@ ns.ZONES = {
   ["Tirisfal Glades"] = { map = 1420, area = 85 },
   ["Uldaman (Dungeon)"] = { map = nil, area = 1337 },
   ["Un'Goro Crater"] = { map = 1449, area = 490 },
+  ["Undercity"] = { map = 1458, area = 1497 },
   ["Wailing Caverns (Dungeon)"] = { map = nil, area = 718 },
   ["Western Plaguelands"] = { map = 1422, area = 28 },
   ["Westfall"] = { map = 1436, area = 40 },
@@ -796,4 +799,58 @@ ns.TRAINERS = {
   [10090] = { en = "Belia Thundergranite", ru = "Белия Громовой Гранит", z = "Ironforge", side = "A", c = { 705, 851 } },
   [254411] = { en = "Quel'dora Quickgale", ru = "Кель'дора Стремительный Шторм", z = "Zephras Isle", c = { 596, 725 } },
   [258930] = { en = "Isaac Chan", ru = "Исаак Чан", z = "Elwynn Forest", side = "A", c = { 417, 665 } },
+}
+
+-- Stable masters (Wowhead). Same shape as ns.TRAINERS.
+ns.STABLES = {
+  [6749] = { en = "Erma", ru = "Ирма", z = "Elwynn Forest", side = "A", c = { 428, 656 } },
+  [9976] = { en = "Tharlidun", ru = "Тарлидун", z = "Arathi Highlands", side = "H", c = { 738, 332 } },
+  [9977] = { en = "Sylista", ru = "Силиста", z = "Stormwind City", side = "A", c = { 295, 511, 424, 639 } },
+  [9978] = { en = "Wesley", ru = "Весли", z = "Hillsbrad Foothills", side = "A", c = { 504, 585 } },
+  [9979] = { en = "Sarah Goode", ru = "Сара Гуди", z = "Silverpine Forest", side = "H", c = { 435, 412 } },
+  [9980] = { en = "Shelby Stoneflint", ru = "Шелби Щебенка", z = "Dun Morogh", side = "A", c = { 469, 525 } },
+  [9981] = { en = "Sikwa", ru = "Сиква", z = "The Barrens", side = "H", c = { 516, 296 } },
+  [9982] = { en = "Penny", ru = "Пенни", z = "Redridge Mountains", side = "A", c = { 241, 465 } },
+  [9983] = { en = "Kelsuwa", ru = "Кельсува", z = "The Barrens", side = "H", c = { 452, 585 } },
+  [9984] = { en = "Ulbrek Firehand", ru = "Ульбрек Огненная Длань", z = "Ironforge", side = "A", c = { 694, 838 } },
+  [9985] = { en = "Laziphus", ru = "Лазиф", z = "Tanaris", c = { 522, 280 } },
+  [9986] = { en = "Shyrka Wolfrunner", ru = "Ширка Волкопас", z = "Feralas", side = "H", c = { 745, 433 } },
+  [9987] = { en = "Shoja'my", ru = "Шоя'май", z = "Durotar", side = "H", c = { 520, 418 } },
+  [9988] = { en = "Xon'cha", ru = "Ксон'ча", z = "Orgrimmar", side = "H", c = { 700, 150 } },
+  [9989] = { en = "Lina Hearthstove", ru = "Лина Жаркий Очаг", z = "Loch Modan", side = "A", c = { 344, 478 } },
+  [10045] = { en = "Kirk Maxwell", ru = "Кирк Максвелл", z = "Westfall", side = "A", c = { 530, 530 } },
+  [10046] = { en = "Bethaine Flinthammer", ru = "Бетайна Кремнемолот", z = "Wetlands", side = "A", c = { 105, 595 } },
+  [10047] = { en = "Michael", ru = "Мишель", z = "Dustwallow Marsh", side = "A", c = { 660, 455 } },
+  [10048] = { en = "Gereck", ru = "Герек", z = "Stonetalon Mountains", side = "H", c = { 478, 612 } },
+  [10049] = { en = "Hekkru", ru = "Хеккру", z = "Swamp of Sorrows", side = "H", c = { 455, 546 } },
+  [10050] = { en = "Seikwa", ru = "Сейква", z = "Mulgore", side = "H", c = { 464, 620 } },
+  [10051] = { en = "Seriadne", ru = "Сериадна", z = "Teldrassil", side = "A", c = { 566, 595 } },
+  [10052] = { en = "Maluressian", ru = "Малурессиан", z = "Ashenvale", side = "A", c = { 365, 505 } },
+  [10053] = { en = "Anya Maulray", ru = "Аня Молрэ", z = "Undercity", side = "H", c = { 675, 381 } },
+  [10054] = { en = "Bulrug", ru = "Балруг", z = "Thunder Bluff", side = "H", c = { 446, 599 } },
+  [10055] = { en = "Morganus", ru = "Морганус", z = "Tirisfal Glades", side = "H", c = { 600, 522 } },
+  [10056] = { en = "Alassin", ru = "Алассин", z = "Darnassus", side = "A", c = { 396, 100 } },
+  [10057] = { en = "Theodore Mont Claire", ru = "Теодор Монт-Клэр", z = "Hillsbrad Foothills", side = "H", c = { 622, 198 } },
+  [10058] = { en = "Greth", ru = "Грет", z = "Badlands", side = "H", c = { 37, 475 } },
+  [10059] = { en = "Antarius", ru = "Антарий", z = "Feralas", side = "A", c = { 315, 432 } },
+  [10060] = { en = "Grimestack", ru = "Трубадым", z = "Stranglethorn Vale", c = { 272, 772 } },
+  [10061] = { en = "Killium Bouldertoe", ru = "Киллиум Твердопал", z = "The Hinterlands", side = "A", c = { 144, 454 } },
+  [10062] = { en = "Steven Black", ru = "Стивен Блэк", z = "Duskwood", side = "A", c = { 740, 464 } },
+  [10063] = { en = "Reggifuz", ru = "Реггифуз", z = "The Barrens", c = { 622, 392 } },
+  [10085] = { en = "Jaelysia", ru = "Джеласия", z = "Darkshore", side = "A", c = { 374, 442 } },
+  [11069] = { en = "Jenova Stoneshield", ru = "Дженова Камнещит", z = "Stormwind City", side = "A", c = { 610, 171, 670, 375 } },
+  [11104] = { en = "Shelgrayn", ru = "Шельграйн", z = "Desolace", side = "A", c = { 655, 78 } },
+  [11105] = { en = "Aboda", ru = "Абода", z = "Desolace", side = "H", c = { 248, 686 } },
+  [11117] = { en = "Awenasa", ru = "Авенаса", z = "Thousand Needles", side = "H", c = { 458, 510 } },
+  [11119] = { en = "Azzleby", ru = "Аззлеби", z = "Winterspring", c = { 604, 380 } },
+  [14741] = { en = "Huntsman Markhor", ru = "Охотник Мархор", z = "The Hinterlands", side = "H", c = { 790, 795 } },
+  [15131] = { en = "Qeeju", ru = "Киджу", z = "Ashenvale", side = "H", c = { 734, 610 } },
+  [15722] = { en = "Squire Leoren Mal'derath", ru = "Оруженосец Леорен Мал'дерат", z = "Silithus", c = { 492, 365 } },
+  [16094] = { en = "Durik", ru = "Дарик", z = "Stranglethorn Vale", side = "H", c = { 318, 294 } },
+  [43408] = { en = "Aili Greenwillow", ru = "Aili Greenwillow", z = "Mount Hyjal", side = "A", c = { 705, 498 } },
+  [251953] = { en = "Talia Softglen", ru = "Талиа Мягкая Роща", z = "Alterac Mountains", side = "A", c = { 196, 701 } },
+  [256673] = { en = "Grik", ru = "Grik", z = "Riverglades", side = "H", c = { 582, 450 } },
+  [259190] = { en = "Ephram Barbaro", ru = "Эфрам Барбаро", z = "Tirisfal Glades", side = "H", c = { 202, 465 } },
+  [259859] = { en = "Wheatley", ru = "Уитли", z = "Riverglades", side = "A", c = { 635, 850 } },
+  [260525] = { en = "Tallow Sparksocket", ru = "Tallow Sparksocket", z = "Riverglades", c = { 785, 539 } },
 }

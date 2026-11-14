@@ -35,6 +35,14 @@ v0.1 exists in this folder. This spec fixes the review findings. Each executor o
 > - v0.5.1: habitat pins are circles (the mean of the canvas sides times the cluster radius) and are drawn only
 >   for the beast under the mouse or the highlighted one; the option `areasAlways` (default false) replaces `areas`.
 >   Every habitat pin is still acquired on refresh and registers itself per beast, so hovering only toggles textures.
+> - v0.6: stable masters. `ns.STABLES` (same shape as `ns.TRAINERS`) is built from the Wowhead snapshot
+>   `tools/stable_masters_wowhead.json`; the build stops on any id that is neither used nor listed in
+>   `STABLES_LEFT_OUT`. Core: `ns.StablesOnMap`, `ns.NearestStable(cont, x, y)`, `ns.NearestStableToPlayer`,
+>   `ns.NearestStableToBeast` (from the edge of the nearest habitat), `ns.StableText`, `ns.SetStableWaypoint`,
+>   option `stables`, `/ba stable`. Trainers and stable masters share `BeastAtlasTrainerPinTemplate`
+>   (`OnAcquired(kind, id, spot, dx)`; everything kind-specific is set there because pins are pooled).
+>   Distances are straight lines. Zones without a known uiMapID (Riverglades, Mount Hyjal) are looked up by
+>   area name; when that fails their stable masters are skipped everywhere.
 > - Other client languages: `ns.LearnFamily` (family names learned from tooltips of known beasts, saved in
 >   `BeastAtlasDB.familyNames`) and the client's own spell names are accepted by `ns.AbilityByName`.
 
@@ -377,7 +385,7 @@ Rules:
 Purpose: the shipped data is young; when the player tames a beast, record what it really knows.
 - Hunters only; register on the `"LOGIN"` bus event: `UNIT_SPELLCAST_SENT`, `UNIT_SPELLCAST_START`,
   `UNIT_SPELLCAST_CHANNEL_START`, `UNIT_PET`.
-- Tame Beast is spell id 1515 in Classic; this is **not verified** for Forever. A cast counts as a tame when its
+- Tame Beast is spell id 1515 (as in Classic). A cast counts as a tame when its
   `spellID == 1515`, or when `C_Spell.GetSpellName(spellID)` and `C_Spell.GetSpellName(1515)` are both non-nil and
   equal. Only casts by `"player"`.
 - On such a cast, snapshot the target (skip if anything needed is secret/nil): npc id (GUID type `Creature`, 6th

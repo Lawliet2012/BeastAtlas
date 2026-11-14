@@ -5,12 +5,14 @@
 --   3. get the main pet back                               (the rank is learned, the main pet is not out)
 --   4. teach it at Beast Training                          (the main pet is out)
 -- The steps follow Petopia's training guide (tools/cache/petopia/training.html).
--- Everything is derived from what the other modules already track; nothing is polled.
+-- Everything is derived from what the other modules already track. Nothing is polled, except that while the
+-- panel shows the nearest stable master its distance is refreshed every few seconds.
 local _, ns = ...
 local L = ns.L
 local S = ns.STATUS
 
 local WIDTH = 290
+local STABLE_REFRESH = 5 -- seconds between updates of the distance to the stable master
 local CHECK = "|TInterface\\AddOns\\BeastAtlas\\Media\\Check:13:13:0:0|t "
 local GOLD, WHITE, GREY, GREEN, RED = "|cffffd100", "|cffffffff", "|cff808080", "|cff4dff4d", "|cffff4040"
 -- which stage the panel leads with when several things are possible at once
@@ -136,6 +138,26 @@ local function CreatePanel()
         f:Hide()
     end)
     f.close = close
+
+    -- the nearest stable master: a click sets a waypoint
+    local stable = CreateFrame("Button", nil, f)
+    stable:SetWidth(WIDTH - 24)
+    stable.text = Line(stable)
+    stable.text:SetPoint("TOPLEFT", 0, -2)
+    local hl = stable:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetAllPoints()
+    hl:SetColorTexture(1, 1, 1, 0.08)
+    stable:SetScript("OnClick", function(self)
+        if self.stableId then ns.SetStableWaypoint(self.stableId, self.spot) end
+    end)
+    stable:Hide()
+    f.stable = stable
+    f:SetScript("OnHide", function(self)
+        if self.ticker then
+            self.ticker:Cancel()
+            self.ticker = nil
+        end
+    end)
     f:Hide()
     return f
 end
@@ -202,6 +224,27 @@ local function Render(goals)
             prev = fs
         end
     end
+
+    -- Where to leave the pet (step 1, only while one is out) or to take the main pet back (step 3).
+    local stable = panel.stable
+    local stableId, spot, dist
+    if (g.stage == 1 and UnitExists("pet")) or g.stage == 3 then
+        stableId, spot, dist = ns.NearestStableToPlayer()
+    end
+    if stableId then
+        stable.stableId, stable.spot = stableId, spot
+        stable.text:SetText(GOLD .. L.STABLE_NEAREST:format("|r" .. WHITE .. ns.StableText(stableId, dist)) .. "|r\n"
+            .. GREY .. L.STABLE_STRAIGHT .. "|r")
+        local h = stable.text:GetStringHeight() + 4
+        stable:SetHeight(h)
+        stable:ClearAllPoints()
+        stable:SetPoint("TOPLEFT", prev, "BOTTOMLEFT", 0, -7)
+        stable:Show()
+        height = height + h + 7
+    else
+        stable.stableId = nil
+        stable:Hide()
+    end
     panel:SetHeight(height + 10)
 end
 
@@ -221,7 +264,8 @@ local function Dismissed()
     return set
 end
 
-local function Update()
+local Update
+Update = function()
     if not (ns.isHunter and ns.db) then return end
     Dismissed()
     local goals = ns.db.helper and ns.TrainingGoals() or {}
@@ -239,6 +283,13 @@ local function Update()
     panel.signature = signature
     Render(goals)
     panel:Show()
+    -- the distance to the stable master changes as the hunter walks
+    if panel.stable:IsShown() then
+        panel.ticker = panel.ticker or C_Timer.NewTicker(STABLE_REFRESH, Update)
+    elseif panel.ticker then
+        panel.ticker:Cancel()
+        panel.ticker = nil
+    end
 end
 
 local queued

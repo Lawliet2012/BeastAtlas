@@ -72,6 +72,9 @@ Mock = { __index = function(t, k)
     -- a wrapped string is as tall as its text needs at its width (6 px per byte, 12 px per line)
     if k == "SetWidth" then return function(self, w) self.__width = w end end
     if k == "SetSize" then return function(self, w, h) self.__w, self.__h = w, h end end
+    if k == "SetHeight" then return function(self, h) self.__h = h end end
+    if k == "SetVertexColor" then return function(self, r, g, b, a) self.__color = { r, g, b, a } end end
+    if k == "SetPosition" then return function(self, x, y) self.__x, self.__y = x, y end end
     if k == "GetStringHeight" then
         return function(self)
             local w = rawget(self, "__width")
@@ -185,7 +188,7 @@ end
 -------------------------------------------------------------------------------
 function GetLocale() return __LOCALE end
 function UnitClass() return __CLASS, __CLASS end
-__FACTION = "Horde"
+__FACTION = __FACTION or "Horde" -- the runner may ask for an Alliance player
 function UnitFactionGroup() return __FACTION, __FACTION end
 function UnitExists(u) return __U[u] ~= nil end
 function UnitIsDead() return false end
@@ -280,6 +283,11 @@ MapCanvasPinMixin = {
         self.__x, self.__y = x, y
     end,
     GetMap = function(self) return self.owningMap end,
+    SetNudgeTargetFactor = function(self, v) self.__nudgeTarget = v end,
+    SetNudgeSourceRadius = function(self, v) self.__nudgeRadius = v end,
+    SetNudgeSourceMagnitude = function(self, out, inn) self.__nudgeMagOut, self.__nudgeMagIn = out, inn end,
+    SetNudgeZoomedOutFactor = function(self, v) self.__nudgeOut = v end,
+    SetNudgeZoomedInFactor = function(self, v) self.__nudgeIn = v end,
     OnClick = function(self, ...) if self.OnMouseClickAction then self:OnMouseClickAction(...) end end,
     -- the real one calls the protected SetPassThroughButtons; an addon pin must not get here
     CheckMouseButtonPassthrough = function() error("protected SetPassThroughButtons called from addon pin") end,
@@ -290,17 +298,31 @@ local Map = { pins = {}, id = 1429 }
 __map = Map
 function Map:GetMapID() return self.id end
 function Map:GetCanvas() return self.canvas end
-function Map:RemoveAllPinsByTemplate(tpl) self.pins[tpl] = {} end
+-- Released pins go back to their template's pool and are handed out again, last released first.
+function Map:RemoveAllPinsByTemplate(tpl)
+    self.pool = self.pool or {}
+    local pool = self.pool[tpl] or {}
+    self.pool[tpl] = pool
+    for _, pin in ipairs(self.pins[tpl] or {}) do
+        pin.__nudgeOut, pin.__nudgeIn = nil, nil
+        pool[#pool + 1] = pin
+    end
+    self.pins[tpl] = {}
+end
 function Map:AcquirePin(tpl, ...)
     assert(not __combat, "AcquirePin during combat")
     local def = assert(__TEMPLATES[tpl], "unknown pin template " .. tostring(tpl))
-    local pin = CreateFrame("Frame")
-    for k, v in pairs(assert(_G[def.mixin], "mixin " .. def.mixin .. " missing")) do pin[k] = v end
-    for key in pairs(def.keys) do pin[key] = CreateFrame("Region") end
-    pin.__mouse = def.mouse
-    pin.owningMap = self
-    assert(pin:GetScript("OnEnter") == nil and pin:GetScript("OnLeave") == nil, "pin has OnEnter/OnLeave")
-    pin:OnLoad()
+    local pin = self.pool and self.pool[tpl] and table.remove(self.pool[tpl])
+    if not pin then
+        -- a new frame: the mixin's OnLoad runs once, never again when the pin is reused
+        pin = CreateFrame("Frame")
+        for k, v in pairs(assert(_G[def.mixin], "mixin " .. def.mixin .. " missing")) do pin[k] = v end
+        for key in pairs(def.keys) do pin[key] = CreateFrame("Region") end
+        pin.__mouse = def.mouse
+        pin.owningMap = self
+        assert(pin:GetScript("OnEnter") == nil and pin:GetScript("OnLeave") == nil, "pin has OnEnter/OnLeave")
+        pin:OnLoad()
+    end
     pin:OnAcquired(...)
     pin:CheckMouseButtonPassthrough("RightButton")
     pin:ApplyFrameLevel()
@@ -310,6 +332,32 @@ function Map:AcquirePin(tpl, ...)
 end
 function __pinCount(tpl)
     return #(Map.pins[tpl] or {})
+end
+-- Where a pin is drawn at a zoom level (0 = zoomed out, 1 = zoomed in): its position plus the push of the
+-- first source pin near enough, as MapCanvasMixin:CalculatePinNudging and ApplyPinPosition do it.
+function __drawnAt(target, zoom)
+    local x, y = target.__x, target.__y
+    local factor = target.__nudgeTarget or 0
+    if factor <= 0 then return x, y end
+    for _, list in pairs(Map.pins) do
+        for _, source in ipairs(list) do
+            local radius = source.__nudgeRadius or 0
+            if source ~= target and radius > 0 then
+                local limit = factor * radius
+                local dx, dy = x - source.__x, y - source.__y
+                local dist = math.sqrt(dx * dx + dy * dy)
+                if dist < limit then
+                    local vx, vy = 1, 0
+                    if dist > 0 then vx, vy = dx / dist, dy / dist end
+                    local lerp = function(a, b) return a + (b - a) * zoom end
+                    local push = (1 - dist / limit) * factor * lerp(target.__nudgeOut or 0, target.__nudgeIn or 0)
+                        * lerp(source.__nudgeMagOut or 0, source.__nudgeMagIn or 0)
+                    return x + vx * push, y + vy * push
+                end
+            end
+        end
+    end
+    return x, y
 end
 
 UIParent = CreateFrame("Frame", "UIParent")

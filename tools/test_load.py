@@ -4,7 +4,8 @@ Offline checks for BeastAtlas (no game client needed):
   1. pin templates carry no XML scripts (the map canvas asserts on that),
   2. every .lua file in the TOC compiles under Lua 5.1 (WoW's dialect),
   3. the addon loads against stand-ins for the client API (tools/wow_stubs.lua) and the scenarios in
-     tools/test_scenarios.lua pass: main pet, known-rank sources, statuses, map pins, window, tames, tips.
+     tools/test_scenarios.lua pass: main pet, known-rank sources, statuses, map pins, stable masters, window,
+     tames, tips, the training helper, the Families tab.
 The stand-ins follow the client's UI source, but this is not the game: see README "Known limits".
 Requires: pip install lupa
 """
@@ -48,7 +49,7 @@ def lua_str(s):
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def run(locale, cls, templates):
+def run(locale, cls, templates, faction="Horde"):
     lua = lua51.LuaRuntime(unpack_returned_tuples=True, encoding=None)
     tpl = ", ".join(
         f"[{lua_str(name)}] = {{ mixin = {lua_str(mixin)}, mouse = {str(mouse).lower()}, "
@@ -56,7 +57,7 @@ def run(locale, cls, templates):
         for name, (mixin, keys, mouse) in templates.items())
     rows = ", ".join(f"[{lua_str(n)}] = {h}" for n, h in
                      re.findall(r'<Button name="(\w+)" virtual="true">\s*<Size x="\d+" y="(\d+)"/>', read(ROOT, "UI.xml")))
-    lua.execute(f'__LOCALE = "{locale}"; __CLASS = "{cls}"; __TEMPLATES = {{ {tpl} }}; '
+    lua.execute(f'__LOCALE = "{locale}"; __CLASS = "{cls}"; __FACTION = "{faction}"; __TEMPLATES = {{ {tpl} }}; '
                 f'__ROW_TEMPLATES = {{ {rows} }}; __NS = {{}}'.encode())
     load = lua.eval(b"function(src, name, ...) return assert(loadstring(src, name))(...) end")
     load(read(TOOLS, "wow_stubs.lua").encode(), b"wow_stubs.lua")
@@ -103,18 +104,19 @@ def main():
         return errors
     print("syntax: ok")
 
-    for locale, cls in (("enUS", "HUNTER"), ("ruRU", "HUNTER"), ("enUS", "MAGE")):
+    for locale, cls, faction in (("enUS", "HUNTER", "Horde"), ("ruRU", "HUNTER", "Horde"), ("enUS", "MAGE", "Horde"),
+                                 ("ruRU", "HUNTER", "Alliance")):
         try:
-            fails, info = run(locale, cls, templates)
+            fails, info = run(locale, cls, templates, faction)
         except Exception as e:  # noqa: BLE001
             msg = e.args[0] if e.args else e
             if isinstance(msg, bytes):
                 msg = msg.decode("utf-8", "replace")
-            print(f"[{locale} {cls}] RUNTIME ERROR: {msg}")
+            print(f"[{locale} {cls} {faction}] RUNTIME ERROR: {msg}")
             errors += 1
             continue
         problems = [line for line in fails.split("\n") if line]
-        print(f"[{locale} {cls}] {info}" + ("" if not problems else f"  -- {len(problems)} FAILED"))
+        print(f"[{locale} {cls} {faction}] {info}" + ("" if not problems else f"  -- {len(problems)} FAILED"))
         for p in problems[:30]:
             print("   ", p)
         if len(problems) > 30:

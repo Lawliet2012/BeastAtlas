@@ -3,7 +3,7 @@
 local _, ns = ...
 local L = ns.L
 
--- Tame Beast is 1515 in Classic; not verified for Forever, so the spell name is compared as well.
+-- Tame Beast is spell 1515; the spell name is compared as well, in case the id differs in this client.
 local TAME_SPELL = 1515
 local SNAPSHOT_TTL = 60
 local CHECK_DELAY = 1.5

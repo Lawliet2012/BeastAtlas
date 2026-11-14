@@ -29,6 +29,75 @@ if __CLASS ~= "HUNTER" then
 end
 
 -------------------------------------------------------------------------------
+-- an Alliance hunter: the other half of the faction rules for trainers and stable masters
+-- (the full scenario below plays a Horde hunter, who never sees the NPCs with two spots)
+-------------------------------------------------------------------------------
+if __FACTION == "Alliance" then
+    __U.player.level = 30
+    __fire("ADDON_LOADED", "BeastAtlas")
+    __fire("PLAYER_LOGIN")
+    __advance(3)
+    local SERVICE_PIN = "BeastAtlasTrainerPinTemplate"
+    local function pinsOf(kind, id)
+        local n = 0
+        for _, pin in ipairs(__map.pins[SERVICE_PIN] or {}) do
+            if pin.kind == kind and (id == nil or pin.npcId == id) then n = n + 1 end
+        end
+        return n
+    end
+    WorldMapFrame:Show()
+    local seenA, twoSpots = 0, 0
+    for kind, src in pairs({ stable = ns.STABLES, trainer = ns.TRAINERS }) do
+        for id, t in pairs(src) do
+            local mapID = ns.ZoneMap(t.z)
+            if mapID then
+                WorldMapFrame:SetMapID(mapID)
+                local want = t.side == "H" and 0 or #t.c / 2
+                check(pinsOf(kind, id) == want, ("Alliance: %s %d has %d pins, expected %d"):format(kind, id, pinsOf(kind, id), want))
+                if want > 0 then seenA = seenA + 1 end
+                if want > 1 then twoSpots = twoSpots + 1 end
+            end
+        end
+    end
+    check(seenA >= 25 and twoSpots >= 3, ("Alliance: %d NPCs pinned, %d with two spots"):format(seenA, twoSpots))
+    WorldMapFrame:SetMapID(ns.ZoneMap("Stormwind City"))
+    check(pinsOf("stable") == 4, "Stormwind: two stable masters with two spots each, got " .. pinsOf("stable"))
+    WorldMapFrame:SetMapID(ns.ZoneMap("The Barrens"))
+    check(pinsOf("stable") == 1, "The Barrens for the Alliance: only the neutral stable master in Ratchet")
+    -- a trainer and a stable master standing together are drawn side by side (Teldrassil: the same spot)
+    WorldMapFrame:SetMapID(ns.ZoneMap("Teldrassil"))
+    local stablePin, trainerPin
+    for _, pin in ipairs(__map.pins[SERVICE_PIN] or {}) do
+        if pin.kind == "stable" then stablePin = pin else trainerPin = pin end
+    end
+    check(stablePin and trainerPin, "Teldrassil: one trainer and one stable master expected")
+    if stablePin and trainerPin then
+        local tx, ty = __drawnAt(trainerPin, 0)
+        local sx, sy = __drawnAt(stablePin, 0)
+        check(tx == trainerPin.__x and ty == trainerPin.__y, "Teldrassil: the trainer pin must stay where the trainer stands")
+        check(math.sqrt((sx - tx) ^ 2 + (sy - ty) ^ 2) >= 0.03, "Teldrassil: zoomed out, the stable master's pin lies on the trainer's")
+        sx, sy = __drawnAt(stablePin, 1)
+        check(sx == stablePin.__x and sy == stablePin.__y, "Teldrassil: zoomed in, the stable master's pin must be on its real spot")
+    end
+    -- standing on any spot of any usable stable master, that very spot is the nearest one
+    local spots = 0
+    for id, t in pairs(ns.STABLES) do
+        local mapID = t.side ~= "H" and ns.ZoneMap(t.z)
+        if mapID then
+            for spot = 1, #t.c, 2 do
+                __playerMap, __playerPos = mapID, { x = t.c[spot] / 1000, y = t.c[spot + 1] / 1000 }
+                local nid, nspot, dist = ns.NearestStableToPlayer()
+                check(nid == id and nspot == spot and dist < 0.01,
+                    ("Alliance: standing on stable %d spot %d, the nearest is %s spot %s"):format(id, spot, tostring(nid), tostring(nspot)))
+                spots = spots + 1
+            end
+        end
+    end
+    check(spots >= 25, "Alliance: stable spots checked: " .. spots)
+    return table.concat(fails, "\n"), ("alliance ok: pinned=%d stableSpots=%d"):format(seenA, spots)
+end
+
+-------------------------------------------------------------------------------
 -- 1. login with a pet: it becomes the main pet; its spellbook marks nothing as known
 -------------------------------------------------------------------------------
 local L, S = ns.L, ns.STATUS
@@ -327,7 +396,9 @@ WorldMapFrame:SetMapID(someZone)
 check(ns.db.areasAlways == false, "habitats of all beasts should be off by default")
 check(__pinCount(AREA) > 0 and habitatsShown() == 0, "habitats drawn with no beast under the mouse")
 for _, pin in ipairs(__map.pins[AREA]) do
-    check(pin.__w == pin.__h and pin.__w >= 16, "a habitat is not a circle")
+    check(pin.__w == pin.__h, "a habitat is not a circle")
+    -- the stub's canvas is 600 x 400: the smallest radius drawn is 0.045 of the map
+    check(pin.__w >= 45 - 0.001, "a habitat circle is smaller than the minimum: " .. tostring(pin.__w))
 end
 do
     local hoverPin = __map.pins[ICON][1]
@@ -336,14 +407,23 @@ do
     check(habitatsShown() == spots, ("hovering a pin shows %d habitats, the beast has %d spots"):format(habitatsShown(), spots))
     hoverPin:OnMouseLeave()
     check(habitatsShown() == 0, "habitats stay after the mouse leaves the pin")
-    -- after a redraw the old pins are back in the pool: hovering must not touch them
-    local old = {}
-    for i, pin in ipairs(__map.pins[AREA]) do old[i] = pin end
+    -- after a redraw the same pins come back from the pool: each must be switched once, not once per redraw
     WorldMapFrame:SetMapID(someZone)
+    local calls, originals = 0, {}
+    for _, pin in ipairs(__map.pins[AREA]) do
+        local original = pin.SetHover
+        originals[pin] = original
+        pin.SetHover = function(self, on)
+            if on then calls = calls + 1 end
+            return original(self, on)
+        end
+    end
     hoverPin = __map.pins[ICON][1]
+    spots = #ns.BEASTS[hoverPin.stack.ids[1]].c / 3
     hoverPin:OnMouseEnter()
-    for _, pin in ipairs(old) do check(not pin.Fill:IsShown(), "hovering lit a habitat pin of the previous redraw") end
+    check(calls == spots, ("hovering switched habitat pins %d times for %d spots (stale pins from an earlier redraw?)"):format(calls, spots))
     hoverPin:OnMouseLeave()
+    for pin, original in pairs(originals) do pin.SetHover = original end
     ns.SetOption("areasAlways", true)
     __advance(0.5)
     check(__pinCount(AREA) > 0 and habitatsShown() == __pinCount(AREA), "the 'always' option does not draw every habitat")
@@ -372,6 +452,14 @@ info[#info + 1] = "zoneSummaryPins=" .. zonePins
 
 -- pet trainers: the player's faction only (the stub player is Horde), every spot of a trainer, own option
 local TRAINER = "BeastAtlasTrainerPinTemplate"
+-- trainers and stable masters share the template: the pins of one kind on the map being shown
+local function servicePins(kind)
+    local out = {}
+    for _, pin in ipairs(__map.pins[TRAINER] or {}) do
+        if pin.kind == kind then out[#out + 1] = pin end
+    end
+    return out
+end
 local nTrainers, shown = 0, 0
 for id, t in pairs(ns.TRAINERS) do
     nTrainers = nTrainers + 1
@@ -382,10 +470,10 @@ for id, t in pairs(ns.TRAINERS) do
     check(mapID, "trainer zone has no map " .. id)
     WorldMapFrame:SetMapID(mapID)
     local mine = 0
-    for _, pin in ipairs(__map.pins[TRAINER] or {}) do
-        local pt = ns.TRAINERS[pin.trainerId]
-        check(pt.side ~= "A", "Alliance trainer shown to a Horde player: " .. pin.trainerId)
-        if pin.trainerId == id then mine = mine + 1 end
+    for _, pin in ipairs(servicePins("trainer")) do
+        local pt = ns.TRAINERS[pin.npcId]
+        check(pt.side ~= "A", "Alliance trainer shown to a Horde player: " .. pin.npcId)
+        if pin.npcId == id then mine = mine + 1 end
         pin:OnMouseEnter(); pin:OnMouseLeave()
     end
     if t.side == "A" then
@@ -398,24 +486,237 @@ end
 check(nTrainers >= 10 and shown >= 3, ("trainers=%d shown=%d"):format(nTrainers, shown))
 info[#info + 1] = ("trainers=%d shownToHorde=%d"):format(nTrainers, shown)
 WorldMapFrame:SetMapID(ns.ZoneMap("Orgrimmar"))
-check(__pinCount(TRAINER) == 1, "Orgrimmar should show one trainer pin")
+check(#servicePins("trainer") == 1, "Orgrimmar should show one trainer pin")
 __waypoint = nil
-__map.pins[TRAINER][1]:OnClick("LeftButton")
+servicePins("trainer")[1]:OnClick("LeftButton")
 check(__waypoint ~= nil, "trainer pin click did not set a waypoint")
 ns.SetOption("trainers", false)
 __advance(0.5)
-check(__pinCount(TRAINER) == 0, "trainer pins shown with the option off")
+check(#servicePins("trainer") == 0, "trainer pins shown with the option off")
 ns.SetOption("trainers", true)
 __advance(0.5)
-check(__pinCount(TRAINER) == 1, "trainer pins not restored")
+check(#servicePins("trainer") == 1, "trainer pins not restored")
 for _, cont in ipairs({ 1414, 1415 }) do
     WorldMapFrame:SetMapID(cont)
-    check(__pinCount(TRAINER) == 0, "trainer pins on a continent map")
+    check(__pinCount(TRAINER) == 0, "trainer or stable pins on a continent map")
 end
 __combat = true
 WorldMapFrame:SetMapID(ns.ZoneMap("Orgrimmar"))
-check(__pinCount(TRAINER) == 0, "trainer pins acquired in combat")
+check(__pinCount(TRAINER) == 0, "trainer or stable pins acquired in combat")
 __combat = false
+
+-------------------------------------------------------------------------------
+-- 8b. stable masters: data, pins, the nearest one
+-------------------------------------------------------------------------------
+do
+    local nStables, usable, noMap = 0, 0, 0
+    for id, t in pairs(ns.STABLES) do
+        nStables = nStables + 1
+        check(t.en ~= "" and t.ru ~= "" and ns.ZONES[t.z], "bad stable entry " .. id)
+        check(not t.ru:find("^%[") , "untranslated placeholder name kept: " .. id)
+        check(#t.c >= 2 and #t.c % 2 == 0, "bad stable coords " .. id)
+        check(t.side == nil or t.side == "A" or t.side == "H", "bad stable side " .. id)
+        for i = 1, #t.c do check(t.c[i] >= 0 and t.c[i] <= 1000, "stable coord out of range " .. id) end
+        local mapID = ns.ZoneMap(t.z)
+        if not mapID then
+            -- a zone the client has no map for (new zones are found by name; this stub knows none of them)
+            noMap = noMap + 1
+            check(ns.ZONES[t.z].map == nil, "stable zone with a map id that the stub rejects: " .. t.z)
+        else
+            WorldMapFrame:SetMapID(mapID)
+            local mine = 0
+            for _, pin in ipairs(servicePins("stable")) do
+                check(ns.STABLES[pin.npcId].side ~= "A", "Alliance stable master shown to a Horde player: " .. pin.npcId)
+                if pin.npcId == id then mine = mine + 1 end
+            end
+            if t.side == "A" then
+                check(mine == 0, "Alliance stable master pinned " .. id)
+            else
+                check(mine == #t.c / 2, ("stable %d: %d pins for %d spots"):format(id, mine, #t.c / 2))
+                usable = usable + 1
+            end
+        end
+    end
+    check(nStables >= 45 and usable >= 20 and noMap >= 1, ("stables=%d usable=%d noMap=%d"):format(nStables, usable, noMap))
+    info[#info + 1] = ("stables=%d shownToHorde=%d"):format(nStables, usable)
+
+    -- The Barrens for a Horde hunter: Sikwa, Kelsuwa and the neutral Reggifuz - the three to look for in game
+    WorldMapFrame:SetMapID(ns.ZoneMap("The Barrens"))
+    local names = {}
+    for _, pin in ipairs(servicePins("stable")) do names[#names + 1] = ns.STABLES[pin.npcId].en end
+    table.sort(names)
+    check(table.concat(names, ",") == "Kelsuwa,Reggifuz,Sikwa", "stable masters in the Barrens: " .. table.concat(names, ","))
+
+    -- Orgrimmar: one trainer, one stable master; pooled pins must not keep the other kind's look
+    WorldMapFrame:SetMapID(ns.ZoneMap("Orgrimmar"))
+    local sp, tp = servicePins("stable"), servicePins("trainer")
+    check(#sp == 1 and #tp == 1, ("Orgrimmar: %d stable pins, %d trainer pins"):format(#sp, #tp))
+    local function look(pin) return table.concat(pin.Ring.__color, ",") end
+    local stableLook, trainerLook = look(sp[1]), look(tp[1])
+    check(stableLook ~= trainerLook, "stable and trainer pins share a ring colour")
+    for i = 1, 3 do
+        -- redraws hand the pooled frames out in another order: the look must follow the kind, not the frame
+        ns.SetOption("trainers", i % 2 == 0)
+        __advance(0.5)
+        for _, pin in ipairs(servicePins("stable")) do check(look(pin) == stableLook, "a reused pin kept the trainer's ring colour") end
+        for _, pin in ipairs(servicePins("trainer")) do check(look(pin) == trainerLook, "a reused pin kept the stable's ring colour") end
+    end
+    ns.SetOption("trainers", true)
+    __advance(0.5)
+    sp = servicePins("stable")
+    GameTooltip.__lines = {}
+    sp[1]:OnMouseEnter()
+    local tip = table.concat(GameTooltip.__lines, "\n")
+    check(tip:find(loc(ns.STABLES[sp[1].npcId]), 1, true) and tip:find(L.STABLE_MASTER, 1, true)
+        and not tip:find(L.TRAINER_ONLY, 1, true), "stable pin tooltip is wrong: " .. tip)
+    sp[1]:OnMouseLeave()
+    __waypoint = nil
+    sp[1]:OnClick("LeftButton")
+    local c = ns.STABLES[sp[1].npcId].c
+    check(__waypoint and __waypoint[1] == ns.ZoneMap("Orgrimmar") and math.abs(__waypoint[2] - c[1] / 1000) < 1e-9,
+        "stable pin click did not set a waypoint on the stable master")
+    -- Durotar: the two stand 1.7% of the map apart. Zoomed out the stable master's pin is pushed off the
+    -- trainer's; zoomed in both are exactly where the NPCs stand. Every pin sits on its true spot in the data.
+    WorldMapFrame:SetMapID(ns.ZoneMap("Durotar"))
+    local sd, td = servicePins("stable"), servicePins("trainer")
+    check(#sd == 1 and #td == 1, "Durotar: one trainer and one stable master expected")
+    if #sd == 1 and #td == 1 then
+        local sPin, tPin = sd[1], td[1]
+        local sc, tc = ns.STABLES[sPin.npcId].c, ns.TRAINERS[tPin.npcId].c
+        check(sPin.__x == sc[1] / 1000 and sPin.__y == sc[2] / 1000 and tPin.__x == tc[1] / 1000 and tPin.__y == tc[2] / 1000,
+            "Durotar: a pin is not placed on the NPC's own coordinates")
+        local tx, ty = __drawnAt(tPin, 0)
+        local sx, sy = __drawnAt(sPin, 0)
+        local real = math.sqrt((sPin.__x - tPin.__x) ^ 2 + (sPin.__y - tPin.__y) ^ 2)
+        check(real < 0.03, "test setup: the Durotar pair should be close together")
+        check(tx == tPin.__x and ty == tPin.__y, "Durotar: the trainer pin moved")
+        check(math.sqrt((sx - tx) ^ 2 + (sy - ty) ^ 2) >= 0.03, "Durotar: zoomed out, the stable master's pin overlaps the trainer's")
+        sx, sy = __drawnAt(sPin, 1)
+        check(sx == sPin.__x and sy == sPin.__y, "Durotar: zoomed in, the stable master's pin is not on its real spot")
+        -- without the trainer pins there is nothing to move away from
+        ns.SetOption("trainers", false)
+        __advance(0.5)
+        local alone = servicePins("stable")[1]
+        sx, sy = __drawnAt(alone, 0)
+        check(sx == alone.__x and sy == alone.__y, "Durotar: the stable master's pin is pushed with no trainer pin shown")
+        ns.SetOption("trainers", true)
+        __advance(0.5)
+        -- pooled frames change kind between redraws: a trainer pin must never keep a stable pin's settings
+        for _, pin in ipairs(servicePins("trainer")) do
+            check((pin.__nudgeTarget or 0) == 0 and (pin.__nudgeRadius or 0) > 0, "a trainer pin is set up to be pushed like a stable pin")
+        end
+        for _, pin in ipairs(servicePins("stable")) do
+            check((pin.__nudgeRadius or 0) == 0 and (pin.__nudgeTarget or 0) > 0, "a stable pin is set up to push like a trainer pin")
+        end
+    end
+    WorldMapFrame:SetMapID(ns.ZoneMap("Orgrimmar"))
+    ns.SetOption("stables", false)
+    __advance(0.5)
+    check(#servicePins("stable") == 0 and #servicePins("trainer") == 1, "stable pins shown with the option off")
+    ns.SetOption("stables", true)
+    __advance(0.5)
+    check(#servicePins("stable") == 1, "stable pins not restored")
+
+    -- the nearest stable master, against a plain search with the stub's world formula
+    local function world(mapID, x, y) return (mapID % 2 == 0) and 1 or 0, x * 3000 + (mapID % 50) * 3000, y * 2000 end
+    local function nearest(cont, px, py, radiusOf)
+        local best, bestId
+        for id, t in pairs(ns.STABLES) do
+            local mapID = t.side ~= "A" and ns.ZoneMap(t.z)
+            if mapID then
+                for spot = 1, #t.c, 2 do
+                    local sc, sx, sy = world(mapID, t.c[spot] / 1000, t.c[spot + 1] / 1000)
+                    if sc == cont then
+                        local d = math.max(0, math.sqrt((sx - px) ^ 2 + (sy - py) ^ 2) - (radiusOf or 0))
+                        if not best or d < best then best, bestId = d, id end
+                    end
+                end
+            end
+        end
+        return bestId, best
+    end
+    for _, place in ipairs({ { ns.ZoneMap("The Barrens"), 0.5, 0.5 }, { ns.ZoneMap("Elwynn Forest"), 0.2, 0.8 },
+        { ns.ZoneMap("Tanaris"), 0.9, 0.1 }, { ns.ZoneMap("Orgrimmar"), 0.5, 0.5 } }) do
+        __playerMap, __playerPos = place[1], { x = place[2], y = place[3] }
+        local wantId, wantDist = nearest(world(place[1], place[2], place[3]))
+        local id, spot, dist = ns.NearestStableToPlayer()
+        check(id ~= nil and wantId ~= nil, "no nearest stable master on map " .. place[1])
+        check(dist and math.abs(dist - wantDist) < 0.01, ("nearest stable from map %d: %s at %s, expected %s at %s"):format(
+            place[1], tostring(id), tostring(dist), tostring(wantId), tostring(wantDist)))
+        check(ns.STABLES[id].side ~= "A", "the nearest stable master belongs to the other faction")
+        check(spot and ns.STABLES[id].c[spot + 1], "nearest stable: bad spot")
+    end
+    -- a place where a stable master of the other continent is closer on paper: it must not win
+    local decisive = 0
+    for _, t in pairs(ns.STABLES) do
+        local mapID = ns.ZoneMap(t.z)
+        if mapID and decisive == 0 then
+            for gx = 0, 4 do
+                for gy = 0, 4 do
+                    local x, y = gx / 4, gy / 4
+                    local cont, wx, wy = world(mapID, x, y)
+                    local _, same = nearest(cont, wx, wy)
+                    local _, other = nearest(1 - cont, wx, wy)
+                    if same and other and other < same - 1 and decisive == 0 then
+                        __playerMap, __playerPos = mapID, { x = x, y = y }
+                        local _, _, dist = ns.NearestStableToPlayer()
+                        check(dist and math.abs(dist - same) < 0.01, "the nearest stable master was taken from another continent")
+                        decisive = decisive + 1
+                    end
+                end
+            end
+        end
+    end
+    check(decisive == 1, "test setup: no place where the other continent's stable master is closer")
+    -- /ba stable: says which one and sets the waypoint there
+    __playerMap, __playerPos = ns.ZoneMap("The Barrens"), { x = 0.5, y = 0.5 }
+    local id, spot, dist = ns.NearestStableToPlayer()
+    __waypoint = nil
+    local from = #__out + 1
+    slash("stable")
+    check(outHas(L.STABLE_NEAREST:format(ns.StableText(id, dist)), from), "/ba stable did not name the nearest stable master")
+    check(__waypoint and __waypoint[1] == ns.ZoneMap(ns.STABLES[id].z)
+        and math.abs(__waypoint[2] - ns.STABLES[id].c[spot] / 1000) < 1e-9, "/ba stable set no waypoint on it")
+    check(ns.StableText(id, dist):find(loc(ns.STABLES[id]), 1, true) and ns.StableText(id, dist):find(ns.ZoneName(ns.STABLES[id].z), 1, true),
+        "StableText lacks the name or the zone")
+    -- no position (an instance): nothing to offer
+    __playerPos = nil
+    check(ns.NearestStableToPlayer() == nil, "a nearest stable master without a player position")
+    from = #__out + 1
+    slash("stable")
+    check(outHas(L.STABLE_NONE, from), "/ba stable without a position should say there is none")
+    -- a stable master in a zone without a map: no waypoint, no error
+    for sid, t in pairs(ns.STABLES) do
+        if not ns.ZoneMap(t.z) then
+            __waypoint = nil
+            ns.SetStableWaypoint(sid, 1)
+            check(__waypoint == nil, "waypoint set for a stable master whose zone has no map")
+            break
+        end
+    end
+    -- near a beast's habitat: measured from the edge of the nearest habitat, not from the player
+    __playerMap, __playerPos = 1429, { x = 0.5, y = 0.5 }
+    local checked = 0
+    for bid, b in pairs(ns.BEASTS) do
+        local mapID = #b.c > 0 and ns.ZoneMap(b.z)
+        if mapID and checked < 40 then
+            local best, bestId
+            for i = 1, #b.c, 3 do
+                local cont, bx, by = world(mapID, b.c[i] / 1000, b.c[i + 1] / 1000)
+                local wantId, wantDist = nearest(cont, bx, by, b.c[i + 2] / 1000 * 3000)
+                if wantId and (not best or wantDist < best) then best, bestId = wantDist, wantId end
+            end
+            local sid, _, sdist = ns.NearestStableToBeast(bid)
+            check((sid == nil) == (bestId == nil), "stable near habitat: presence differs for " .. b.en)
+            if sid and best then
+                check(math.abs(sdist - best) < 0.01, ("stable near %s: %s yd, expected %s yd"):format(b.en, tostring(sdist), tostring(best)))
+                checked = checked + 1
+            end
+        end
+    end
+    check(checked >= 20, "stable near habitat checked for " .. checked .. " beasts")
+    __playerMap, __playerPos = 1429, { x = 0.5, y = 0.5 }
+end
 
 -------------------------------------------------------------------------------
 -- 9. window
@@ -465,6 +766,58 @@ BeastAtlasSearch.__text = ""
 __run(BeastAtlasSearch, "OnTextChanged")
 __advance(0.5)
 ns.ShowBeast(next(ns.BEASTS))
+do
+    -- the detail pane names the stable master nearest to the beast's habitat; a click sets a waypoint there
+    local line
+    for _, f in ipairs(__frames) do
+        if f.__kind == "Button" and rawget(f, "text") and rawget(f, "stableId") ~= nil and f ~= (BeastAtlasHelperFrame and BeastAtlasHelperFrame.stable) then line = f end
+    end
+    local shownFor, hiddenFor, fromYouSeen = 0, 0, 0
+    for bid, b in pairs(ns.BEASTS) do
+        if shownFor < 5 or hiddenFor < 2 or fromYouSeen < 3 then
+            ns.ShowBeast(bid)
+            local sid, spot, dist = ns.NearestStableToBeast(bid)
+            if not line then
+                for _, f in ipairs(__frames) do
+                    if f.__kind == "Button" and rawget(f, "text") and rawget(f, "stableId") ~= nil
+                        and f ~= (BeastAtlasHelperFrame and BeastAtlasHelperFrame.stable) then line = f end
+                end
+            end
+            if sid then
+                shownFor = shownFor + 1
+                check(line and line:IsShown() and line.text:GetText():find(loc(ns.STABLES[sid]), 1, true),
+                    "detail pane: no stable master near the habitat of " .. b.en)
+                -- how far: from the hunter to the stable master (counted here from the map API), then on to the beast
+                local st = ns.STABLES[sid]
+                local _, sp = C_Map.GetWorldPosFromMapPos(ns.ZoneMap(st.z), CreateVector2D(st.c[spot] / 1000, st.c[spot + 1] / 1000))
+                local pc, pp = C_Map.GetWorldPosFromMapPos(__playerMap, CreateVector2D(__playerPos.x, __playerPos.y))
+                local sc = C_Map.GetWorldPosFromMapPos(ns.ZoneMap(st.z), CreateVector2D(0, 0))
+                local subText = line and line.sub:GetText() or ""
+                if sc == pc then
+                    local yards = math.floor(math.sqrt((sp.x - pp.x) ^ 2 + (sp.y - pp.y) ^ 2) + 0.5)
+                    check(subText:find(L.STABLE_FROM_YOU:format(ns.DistanceText(yards)), 1, true),
+                        ("detail pane: distance from the hunter to the stable master missing or wrong for %s: %s"):format(b.en, subText))
+                    fromYouSeen = fromYouSeen + 1
+                else
+                    check(not subText:find(L.STABLE_FROM_YOU:format(""), 1, true), "detail pane: a distance to a stable master on another continent")
+                end
+                check(subText:find(dist < 1 and L.STABLE_AT_HABITAT or L.STABLE_TO_HABITAT:format(ns.DistanceText(math.floor(dist + 0.5))), 1, true),
+                    "detail pane: distance from the stable master to the habitat missing for " .. b.en)
+                check((line.text:GetText():find(ns.ZoneName(st.z), 1, true) ~= nil) == (st.z ~= b.z), "detail pane: the zone is named only when it differs: " .. b.en)
+                __waypoint = nil
+                if line then line.__scripts.OnClick(line) end
+                check(__waypoint and __waypoint[1] == ns.ZoneMap(ns.STABLES[sid].z)
+                    and math.abs(__waypoint[2] - ns.STABLES[sid].c[spot] / 1000) < 1e-9, "detail pane: stable click set no waypoint")
+                if line then line.__scripts.OnEnter(line); line.__scripts.OnLeave(line) end
+            else
+                hiddenFor = hiddenFor + 1
+                check(not line or not line:IsShown(), "detail pane: stable line shown for a beast with no known habitat: " .. b.en)
+            end
+        end
+    end
+    check(shownFor >= 5 and hiddenFor >= 1 and fromYouSeen >= 3,
+        ("detail pane stable line: shown %d, hidden %d, with the hunter's distance %d"):format(shownFor, hiddenFor, fromYouSeen))
+end
 ns.ShowStack({ next(ns.BEASTS) })
 if stackSeen then
     stackSeen:OnClick("LeftButton")
@@ -603,6 +956,16 @@ do
     end
     local wolf = loc(ns.FAMILIES.Wolf)
     local bite3 = loc(ability("bite")) .. " 3"
+    -- the line with the nearest stable master (a button under the steps)
+    local function stableLine()
+        local s = BeastAtlasHelperFrame and BeastAtlasHelperFrame.stable
+        return s and s:IsShown() and s.text:GetText() or nil
+    end
+    local function expectedStable()
+        local id, spot, dist = ns.NearestStableToPlayer()
+        return id and ns.StableText(id, dist), id, spot
+    end
+    __playerMap, __playerPos = ns.ZoneMap("The Barrens"), { x = 0.5, y = 0.5 }
 
     -- start: main pet Fang (Wolf, 24) with Bite 2, the hunter knows nothing
     __U.target = nil
@@ -635,6 +998,28 @@ do
     local teacherName = (ns.Names(ns.BEASTS[teacherId]))
     check(panelShown() and panelText():find(L.HELPER_STEP1_STABLE:format(teacherName), 1, true),
         "helper step 1 does not say to stable the current pet first")
+    -- ... and where the nearest stable master is; a click sets the waypoint there
+    do
+        local text, sid, spot = expectedStable()
+        check(text and stableLine() and stableLine():find(text, 1, true), "helper step 1: no nearest stable master while a pet is out")
+        check(stableLine() and stableLine():find(L.STABLE_STRAIGHT, 1, true), "helper: the stable line does not say the distance is a straight line")
+        local stable = BeastAtlasHelperFrame.stable
+        __waypoint = nil
+        stable.__scripts.OnClick(stable)
+        check(__waypoint and sid and __waypoint[1] == ns.ZoneMap(ns.STABLES[sid].z)
+            and math.abs(__waypoint[2] - ns.STABLES[sid].c[spot] / 1000) < 1e-9, "helper: clicking the stable line set no waypoint on it")
+        -- the panel is tall enough for it: the same step without the line is shorter
+        local withLine = BeastAtlasHelperFrame.__h
+        __playerPos = nil
+        ns.Changed()
+        settle()
+        check(panelShown() and not stableLine(), "helper: stable line shown without a player position")
+        check(BeastAtlasHelperFrame.__h < withLine, "helper: the panel height ignores the stable line")
+        __playerPos = { x = 0.5, y = 0.5 }
+        ns.Changed()
+        settle()
+        check(stableLine(), "helper: stable line not restored")
+    end
     -- no pet out: just "tame your target"
     local keepPet = __U.pet
     __U.pet = nil
@@ -643,6 +1028,7 @@ do
     check(panelShown() and panelText():find(L.HELPER_STEP1_TARGET:format(teacherName), 1, true)
         and not panelText():find(L.HELPER_STEP1_STABLE:format(teacherName), 1, true),
         "helper step 1 without a pet should just name the target")
+    check(not stableLine(), "helper step 1 without a pet out needs no stable master")
     __U.pet = keepPet
     __fire("UNIT_PET", "player")
     settle()
@@ -678,6 +1064,7 @@ do
     settle()
     g = goal()
     check(g and g.stage == 2 and g.rank == 3 and g.forMain, "helper step 2 (teacher pet is out)")
+    check(panelShown() and not stableLine(), "helper step 2 should not point to a stable master")
     check(panelShown() and panelText():find(bite3, 1, true), "helper panel not shown for the teacher")
     -- closing the panel hides it until the situation changes
     check(panelText():find(L.HELPER_STEP2_HINT, 1, true), "helper step 2 hint missing")
@@ -731,11 +1118,24 @@ do
     settle()
     -- the teacher was abandoned and the main pet is in the stable: still step 3 ...
     check(goal() and goal().stage == 3 and panelShown(), "helper: no step 3 when no pet is out")
+    -- the main pet waits in a stable: say where the nearest one is, and keep the distance fresh while walking
+    do
+        local text = expectedStable()
+        check(text and stableLine() and stableLine():find(text, 1, true), "helper step 3: no nearest stable master")
+        __playerPos = { x = 0.9, y = 0.1 }
+        local moved = expectedStable()
+        check(moved ~= text, "helper setup: moving should change the stable text")
+        __advance(6)
+        check(stableLine() and stableLine():find(moved, 1, true), "helper: the distance to the stable master is not refreshed")
+        __playerPos = { x = 0.5, y = 0.5 }
+        __advance(6)
+    end
     -- ... but not on a flight path, where the pet is only hidden
     __onTaxi = true
     ns.Changed()
     settle()
     check(#ns.TrainingGoals() == 0 and not panelShown(), "helper nags on a flight path")
+    check(BeastAtlasHelperFrame.ticker == nil, "helper: the stable ticker keeps running after the panel is hidden")
     __onTaxi = false
     -- training points: the rank being replaced is refunded (30 total, 12 used in the stub = 18 free)
     __U.pet = { name = "Fang", family = wolf, level = 24, guid = "Pet-0-1-1-1-100-0001" }
@@ -743,6 +1143,16 @@ do
     settle()
     local r3, r4 = ability("bite").ranks[3].tp, ability("bite").ranks[4].tp
     check(goal() and goal().stage == 4 and r4 - r3 <= 18, "helper setup: Bite 4 should be affordable after the refund")
+    check(panelShown() and not stableLine() and BeastAtlasHelperFrame.ticker == nil, "helper step 4 should not point to a stable master")
+    -- from step 3 (line and timer on) straight to step 4, the panel never hidden: the timer must stop
+    __U.pet = nil
+    __fire("UNIT_PET", "player")
+    settle()
+    check(goal().stage == 3 and stableLine() and BeastAtlasHelperFrame.ticker ~= nil, "helper setup: step 3 with the stable timer")
+    __U.pet = { name = "Fang", family = wolf, level = 24, guid = "Pet-0-1-1-1-100-0001" }
+    __fire("UNIT_PET", "player")
+    settle()
+    check(goal().stage == 4 and panelShown() and BeastAtlasHelperFrame.ticker == nil, "helper: the stable timer keeps running on step 4")
     local warning = L.HELPER_TP_SHORT:match("^[^%%]+") -- the text before the first number
     check(not panelText():find(warning, 1, true), "helper warns although the refund covers the cost")
     ns.cdb.known.bite = 3
@@ -776,6 +1186,7 @@ do
     __petSpells = { petSpell("bite", 3) }
     __fire("UNIT_PET", "player")
     settle()
+    __playerMap, __playerPos = 1429, { x = 0.5, y = 0.5 }
 end
 
 -------------------------------------------------------------------------------

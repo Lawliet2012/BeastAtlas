@@ -7,7 +7,7 @@
 ## X-License: MIT
 ## X-Curse-Project-ID: 1803424
 ## X-Website: https://github.com/Lawliet2012/BeastAtlas
-## Version: 0.5.1
+## Version: 0.6.0
 ## IconTexture: Interface\Icons\Ability_Hunter_BeastTaming
 ## SavedVariables: BeastAtlasDB
 ## SavedVariablesPerCharacter: BeastAtlasCharDB

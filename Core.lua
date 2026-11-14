@@ -6,6 +6,7 @@ BeastAtlas = ns -- public handle for macros / other addons
 local DEFAULTS = {
     mapPins = true,     -- beasts on the world map
     areasAlways = false, -- habitat areas of every beast at once (otherwise only under the mouse)
+    stables = true,      -- stable masters on the map
     trainers = true,    -- pet trainer NPCs on the world map
     petOnly = true,     -- only abilities the main pet's family can learn
     showLearned = false,
@@ -266,26 +267,41 @@ function ns.BeastsOnMap(mapID)
     return ns.BeastsByMap()[mapID]
 end
 
--- Pet trainers of the player's faction on a zone map: { npcId, ... } | nil. Built once.
-local trainersByMap
-function ns.TrainersOnMap(mapID)
-    if not trainersByMap then
-        trainersByMap = {}
-        local faction = UnitFactionGroup and UnitFactionGroup("player")
-        if IsSecret(faction) then faction = nil end
-        local side = faction == "Alliance" and "A" or faction == "Horde" and "H" or nil
-        for id, t in pairs(ns.TRAINERS or {}) do
-            -- an unknown player faction shows every trainer rather than none
-            if not t.side or not side or t.side == side then
-                local m = ns.ZoneMap(t.z)
-                if m then
-                    trainersByMap[m] = trainersByMap[m] or {}
-                    table.insert(trainersByMap[m], id)
-                end
-            end
+-- Service NPCs (pet trainers, stable masters): only those the player's faction can use.
+local function PlayerSide()
+    local faction = UnitFactionGroup and UnitFactionGroup("player")
+    if IsSecret(faction) then faction = nil end
+    return faction == "Alliance" and "A" or faction == "Horde" and "H" or nil
+end
+
+-- an unknown player faction shows every NPC rather than none
+local function ForMySide(t, side)
+    return not t.side or not side or t.side == side
+end
+
+-- [uiMapID] = { npcId, ... } for the entries of src whose zone has a map in this client
+local function ServicesByMap(src)
+    local out, side = {}, PlayerSide()
+    for id, t in pairs(src or {}) do
+        local m = ForMySide(t, side) and ns.ZoneMap(t.z)
+        if m then
+            out[m] = out[m] or {}
+            table.insert(out[m], id)
         end
     end
+    return out
+end
+
+-- Pet trainers / stable masters on a zone map: { npcId, ... } | nil. Built once (reset at login).
+local trainersByMap, stablesByMap
+function ns.TrainersOnMap(mapID)
+    trainersByMap = trainersByMap or ServicesByMap(ns.TRAINERS)
     return trainersByMap[mapID]
+end
+
+function ns.StablesOnMap(mapID)
+    stablesByMap = stablesByMap or ServicesByMap(ns.STABLES)
+    return stablesByMap[mapID]
 end
 
 -- Map the player is on, with micro maps (caves, buildings) folded into their parent.
@@ -516,6 +532,87 @@ function ns.BeastDistance(id, cont, px, py)
     return best, bestIdx
 end
 
+function ns.DistanceText(d)
+    if not d then return nil end
+    if d == 0 then return L.HERE end
+    if d >= 1000 then return L.KYARDS:format(d / 1000) end
+    return L.YARDS:format(d)
+end
+
+-------------------------------------------------------------------------------
+-- Stable masters: the nearest one, as the crow flies (the atlas knows no roads)
+-------------------------------------------------------------------------------
+-- { { cont, wx, wy, npcId, spot }, ... } for every stable master the player can use. Built once (reset at login).
+local stableSpots
+local function StableSpots()
+    if stableSpots then return stableSpots end
+    stableSpots = {}
+    local side = PlayerSide()
+    for id, t in pairs(ns.STABLES or {}) do
+        local mapID = ForMySide(t, side) and ns.ZoneMap(t.z)
+        if mapID then
+            for spot = 1, #t.c, 2 do
+                local cont, wx, wy = WorldPos(mapID, t.c[spot] / 1000, t.c[spot + 1] / 1000)
+                if cont then stableSpots[#stableSpots + 1] = { cont, wx, wy, id, spot } end
+            end
+        end
+    end
+    return stableSpots
+end
+
+-- Nearest stable master to a point of the world: npcId, spot, yards. nil when none is known on that continent.
+function ns.NearestStable(cont, x, y)
+    if not cont then return nil end
+    local best, bestId, bestSpot
+    for _, s in ipairs(StableSpots()) do
+        if s[1] == cont then
+            local d = math.sqrt((s[2] - x) ^ 2 + (s[3] - y) ^ 2)
+            if not best or d < best then best, bestId, bestSpot = d, s[4], s[5] end
+        end
+    end
+    return bestId, bestSpot, best
+end
+
+function ns.NearestStableToPlayer()
+    return ns.NearestStable(ns.PlayerWorldPos())
+end
+
+-- The stable master closest to any habitat of a beast: npcId, spot, yards from the edge of that habitat.
+function ns.NearestStableToBeast(beastId)
+    local best, bestId, bestSpot
+    for _, h in ipairs(ns.BeastWorldSpots(beastId)) do
+        for _, s in ipairs(StableSpots()) do
+            if s[1] == h[1] then
+                local d = math.max(0, math.sqrt((s[2] - h[2]) ^ 2 + (s[3] - h[3]) ^ 2) - h[5])
+                if not best or d < best then best, bestId, bestSpot = d, s[4], s[5] end
+            end
+        end
+    end
+    return bestId, bestSpot, best
+end
+
+-- Yards from the player to one spot of a stable master; nil on another continent or with no position.
+function ns.StableDistance(id, spot)
+    local cont, px, py = ns.PlayerWorldPos()
+    if not cont then return nil end
+    spot = spot or 1
+    for _, s in ipairs(StableSpots()) do
+        if s[4] == id and s[5] == spot and s[1] == cont then
+            return math.sqrt((s[2] - px) ^ 2 + (s[3] - py) ^ 2)
+        end
+    end
+    return nil
+end
+
+-- "Name, Zone, 340 yd"
+function ns.StableText(id, dist)
+    local t = ns.STABLES and ns.STABLES[id]
+    if not t then return "" end
+    local text = (ns.Names(t)) .. ", " .. ns.ZoneName(t.z)
+    if dist then text = text .. ", " .. ns.DistanceText(dist) end
+    return text
+end
+
 -------------------------------------------------------------------------------
 -- Pet training points, options, resets
 -------------------------------------------------------------------------------
@@ -598,14 +695,17 @@ function ns.SetWaypoint(id, clusterIdx)
     WaypointAt(b, mapID, b.c[clusterIdx] / 1000, b.c[clusterIdx + 1] / 1000)
 end
 
--- spot: index of the x in the trainer's coordinate pairs (1, 3, ...)
-function ns.SetTrainerWaypoint(id, spot)
-    local t = ns.TRAINERS and ns.TRAINERS[id]
+-- spot: index of the x in the NPC's coordinate pairs (1, 3, ...)
+local function ServiceWaypoint(src, id, spot)
+    local t = src and src[id]
     local mapID = t and ns.ZoneMap(t.z)
     spot = spot or 1
     if not mapID or not t.c[spot + 1] then return ns.Print(L.WP_FAIL) end
     WaypointAt(t, mapID, t.c[spot] / 1000, t.c[spot + 1] / 1000)
 end
+
+function ns.SetTrainerWaypoint(id, spot) ServiceWaypoint(ns.TRAINERS, id, spot) end
+function ns.SetStableWaypoint(id, spot) ServiceWaypoint(ns.STABLES, id, spot) end
 
 -------------------------------------------------------------------------------
 -- Init
@@ -640,6 +740,7 @@ frame:SetScript("OnEvent", function(self, event, arg1)
         -- ADDON_LOADED: a zone lookup that fails too early would stay cached for the whole session.
         if ns.MergeObserved then ns.MergeObserved() end
         abilityByKey, abilityByName, byMap = nil, nil, nil
+        trainersByMap, stablesByMap, stableSpots = nil, nil, nil
         ctxCache = nil
         ns.Fire("LOGIN")
     end
@@ -658,6 +759,11 @@ SlashCmdList.BEASTATLAS = function(msg)
         ns.SetMainPet()
     elseif msg == "trainer" then
         ns.DumpTrainer()
+    elseif msg == "stable" or msg == "stables" or msg == "стойла" then
+        local id, spot, dist = ns.NearestStableToPlayer()
+        if not id then return ns.Print(L.STABLE_NONE) end
+        ns.Print(L.STABLE_NEAREST:format(ns.StableText(id, dist)))
+        ns.SetStableWaypoint(id, spot)
     elseif msg == "reset" then
         ns.ResetKnown()
     elseif msg == "help" or msg == "?" then

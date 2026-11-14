@@ -1,7 +1,8 @@
--- World map integration: a MapCanvas data provider with three pooled pin types.
+-- World map integration: a MapCanvas data provider with four pooled pin types.
 --   * area pins: soft circles showing roughly where a beast lives (scale with map zoom); drawn only
 --     for the beast under the mouse or opened from the atlas, unless the "always" option is on,
 --   * icon pins: family icon with a status-colored ring; nearby beasts are stacked into one pin,
+--   * service pins: pet trainers and stable masters of the player's faction,
 --   * zone pins (continent maps): one summary per zone with the number of READY / SOON beasts.
 -- Pins are rebuilt only when the map changes or the shared context changes. No OnUpdate.
 local _, ns = ...
@@ -12,15 +13,25 @@ local AREA_TEMPLATE = "BeastAtlasAreaPinTemplate"
 local ICON_TEMPLATE = "BeastAtlasIconPinTemplate"
 local ZONE_TEMPLATE = "BeastAtlasZonePinTemplate"
 local TRAINER_TEMPLATE = "BeastAtlasTrainerPinTemplate"
-local TRAINER_COLOR = { 0.35, 0.65, 1.00 }
-local TRAINER_ICON = "Interface\\Icons\\Ability_Hunter_BeastTaming"
-local BEAST_TRAINING_SPELL = 5149 -- its icon marks trainers, when the client knows the spell
+-- Service NPCs share one pin template. icon: the icon of a spell the client knows, else the fallback texture.
+local SERVICE = {
+    trainer = { color = { 0.35, 0.65, 1.00 }, spell = 5149, -- Beast Training
+        fallback = "Interface\\Icons\\Ability_Hunter_BeastTaming", label = "TRAINER_ONLY" },
+    stable = { color = { 0.80, 0.62, 1.00 }, spell = 883,   -- Call Pet
+        fallback = "Interface\\Icons\\Ability_Hunter_BeastCall", label = "STABLE_MASTER" },
+}
+-- A trainer and a stable master often stand together. The map canvas has its own way to keep such pins
+-- apart (MapCanvasMixin:CalculatePinNudging, used for flight points): a "source" pin pushes "target" pins
+-- away. The stable master is pushed away from a trainer closer than this fraction of the map - fully when
+-- the map is zoomed out, not at all when it is zoomed in and both can be shown where they really stand.
+local SERVICE_NUDGE = 0.035
 local MASK = "Interface\\CharacterFrame\\TempPortraitAlphaMask"
 -- own textures (white shapes, tinted here): see tools/make_media.py
 local TEX_AREA = "Interface\\AddOns\\BeastAtlas\\Media\\Area"
 local TEX_RING = "Interface\\AddOns\\BeastAtlas\\Media\\Ring"
 local TEX_DISC = "Interface\\AddOns\\BeastAtlas\\Media\\Disc"
 local STACK_DIST = 0.025 -- normalized map distance under which icons are merged
+local AREA_MIN_R = 0.045  -- smallest habitat radius drawn, as a fraction of the map
 local ZONE_PIN_LINES = 6 -- distinct READY ranks listed in a zone pin tooltip
 
 local function AddRoundMask(frame, tex)
@@ -59,7 +70,8 @@ end
 function BeastAtlasAreaPinMixin:OnAcquired(x, y, r, status, id, pinned, highlighted)
     local canvas = self:GetMap():GetCanvas()
     -- r is a fraction of the map, and the map is wider than tall: the mean of both keeps it a circle
-    local size = math.max(16, (canvas:GetWidth() + canvas:GetHeight()) * r)
+    -- (a tight cluster still gets a circle clearly wider than the pin on top of it)
+    local size = math.max(16, (canvas:GetWidth() + canvas:GetHeight()) * math.max(r, AREA_MIN_R))
     self:SetSize(size, size)
     self.color = ns.STATUS_COLOR[status] or ns.STATUS_COLOR[S.LATER]
     self.pinned = pinned
@@ -178,51 +190,73 @@ function BeastAtlasIconPinMixin:OnMouseClickAction(button)
 end
 
 -------------------------------------------------------------------------------
--- Pet trainer pin
+-- Service pin: a pet trainer or a stable master (kind = "trainer" | "stable")
 -------------------------------------------------------------------------------
 BeastAtlasTrainerPinMixin = CreateFromMixins(MapCanvasPinMixin)
 BeastAtlasTrainerPinMixin.CheckMouseButtonPassthrough = NoPassthrough
 
-local trainerIcon
-local function TrainerIcon()
-    if trainerIcon == nil then
+local function ServiceIcon(service)
+    if service.icon == nil then
         local tex
         if C_Spell and C_Spell.GetSpellTexture then
-            local ok, v = pcall(C_Spell.GetSpellTexture, BEAST_TRAINING_SPELL)
+            local ok, v = pcall(C_Spell.GetSpellTexture, service.spell)
             if ok and v and not ns.IsSecret(v) then tex = v end
         end
-        trainerIcon = tex or TRAINER_ICON
+        service.icon = tex or service.fallback
     end
-    return trainerIcon
+    return service.icon
+end
+
+local function ServiceEntry(kind, id)
+    local src = kind == "stable" and ns.STABLES or ns.TRAINERS
+    return src and src[id]
 end
 
 function BeastAtlasTrainerPinMixin:OnLoad()
     self:UseFrameLevelType("PIN_FRAME_LEVEL_AREA_POI")
     self:SetScalingLimits(1, 0.9, 1.25)
     SetupRoundPin(self, true)
-    self.Ring:SetVertexColor(TRAINER_COLOR[1], TRAINER_COLOR[2], TRAINER_COLOR[3], 1)
 end
 
-function BeastAtlasTrainerPinMixin:OnAcquired(id, spot)
-    self.trainerId, self.spot = id, spot
-    self.Icon:SetTexture(TrainerIcon())
-    local c = ns.TRAINERS[id].c
+-- Pins are pooled and shared by both kinds: everything that tells them apart is set here, not in OnLoad.
+function BeastAtlasTrainerPinMixin:OnAcquired(kind, id, spot)
+    self.kind, self.npcId, self.spot = kind, id, spot
+    local service = SERVICE[kind]
+    self.Icon:SetTexture(ServiceIcon(service))
+    self.Ring:SetVertexColor(service.color[1], service.color[2], service.color[3], 1)
+    -- nudging has to be set up before the position: SetPosition is what queues the calculation
+    if kind == "stable" then
+        self:SetNudgeSourceRadius(0)
+        self:SetNudgeTargetFactor(SERVICE_NUDGE)
+        self:SetNudgeZoomedOutFactor(1)
+        self:SetNudgeZoomedInFactor(0)
+    else
+        self:SetNudgeTargetFactor(0)
+        self:SetNudgeSourceRadius(1)
+        self:SetNudgeSourceMagnitude(1, 1)
+    end
+    local c = ServiceEntry(kind, id).c
     self:SetPosition(c[spot] / 1000, c[spot + 1] / 1000)
 end
 
 function BeastAtlasTrainerPinMixin:OnMouseEnter()
-    local t = ns.TRAINERS[self.trainerId]
+    local service = SERVICE[self.kind]
+    local t = ServiceEntry(self.kind, self.npcId)
     local tt = GameTooltip
     tt:SetOwner(self, "ANCHOR_RIGHT")
     local main, second = ns.DisplayName(t)
     tt:AddLine(main, 1, 0.82, 0)
     if second then tt:AddLine(second, 0.6, 0.6, 0.6) end
-    tt:AddLine(L.TRAINER_ONLY, TRAINER_COLOR[1], TRAINER_COLOR[2], TRAINER_COLOR[3])
-    local names = {}
-    for _, ab in ipairs(ns.ABILITIES) do
-        if ab.trainer then names[#names + 1] = (ns.Names(ab)) end
+    tt:AddLine(L[service.label], service.color[1], service.color[2], service.color[3])
+    if self.kind == "stable" then
+        tt:AddLine(L.STABLE_TIP, 0.8, 0.8, 0.8, true)
+    else
+        local names = {}
+        for _, ab in ipairs(ns.ABILITIES) do
+            if ab.trainer then names[#names + 1] = (ns.Names(ab)) end
+        end
+        if #names > 0 then tt:AddLine(L.TRAINER_TEACHES:format(table.concat(names, ", ")), 0.8, 0.8, 0.8, true) end
     end
-    if #names > 0 then tt:AddLine(L.TRAINER_TEACHES:format(table.concat(names, ", ")), 0.8, 0.8, 0.8, true) end
     tt:AddLine(L.TRAINER_PIN_HINT, 0.5, 0.5, 0.5)
     tt:Show()
 end
@@ -232,7 +266,12 @@ function BeastAtlasTrainerPinMixin:OnMouseLeave()
 end
 
 function BeastAtlasTrainerPinMixin:OnMouseClickAction(button)
-    if button == "LeftButton" then ns.SetTrainerWaypoint(self.trainerId, self.spot) end
+    if button ~= "LeftButton" then return end
+    if self.kind == "stable" then
+        ns.SetStableWaypoint(self.npcId, self.spot)
+    else
+        ns.SetTrainerWaypoint(self.npcId, self.spot)
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -316,12 +355,16 @@ function Provider:RemoveAllData()
     map:RemoveAllPinsByTemplate(TRAINER_TEMPLATE)
 end
 
-function Provider:RefreshTrainers(map, mapID)
-    if not (ns.db.mapPins and ns.db.trainers) then return end
-    for _, id in ipairs(ns.TrainersOnMap(mapID) or {}) do
-        local c = ns.TRAINERS[id].c
-        for spot = 1, #c, 2 do map:AcquirePin(TRAINER_TEMPLATE, id, spot) end
+-- Pet trainers and stable masters, each with its own option.
+function Provider:RefreshServices(map, mapID)
+    if not ns.db.mapPins then return end
+    local function Pin(kind, src, ids)
+        for _, id in ipairs(ids or {}) do
+            for spot = 1, #src[id].c, 2 do map:AcquirePin(TRAINER_TEMPLATE, kind, id, spot) end
+        end
     end
+    if ns.db.trainers then Pin("trainer", ns.TRAINERS, ns.TrainersOnMap(mapID)) end
+    if ns.db.stables then Pin("stable", ns.STABLES, ns.StablesOnMap(mapID)) end
 end
 
 function Provider:RefreshZone(map, mapID)
@@ -433,7 +476,7 @@ function Provider:RefreshAllData()
         self:RefreshContinent(map, mapID)
     elseif t == Enum.UIMapType.Zone or t == Enum.UIMapType.Micro then
         self:RefreshZone(map, mapID)
-        self:RefreshTrainers(map, mapID)
+        self:RefreshServices(map, mapID)
     end
 end
 

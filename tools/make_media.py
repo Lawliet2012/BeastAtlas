@@ -50,8 +50,9 @@ def area(r):
     # a glow, not a drawn shape: an even faint fill, a brighter soft rim, and no hard edge anywhere
     if r >= 1.0:
         return 0.0
-    rim = math.exp(-((r - 0.9) / 0.045) ** 2)
-    return (0.2 + 0.5 * rim) * (1.0 - smoothstep(0.93, 1.0, r))
+    # the rim is thin: about a pixel or two on screen at the usual circle sizes
+    rim = math.exp(-((r - 0.955) / 0.02) ** 2)
+    return (0.2 + 0.55 * rim) * (1.0 - smoothstep(0.975, 1.0, r))
 
 
 def ring(r):

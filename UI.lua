@@ -49,12 +49,7 @@ local function LevelText(b)
     return b.l[1] == b.l[2] and tostring(b.l[1]) or (b.l[1] .. "-" .. b.l[2])
 end
 
-local function DistanceText(d)
-    if not d then return nil end
-    if d == 0 then return L.HERE end
-    if d >= 1000 then return L.KYARDS:format(d / 1000) end
-    return L.YARDS:format(d)
-end
+local DistanceText = ns.DistanceText
 
 local function CostText(tp)
     return tp and L.TP:format(tp) or L.TP_UNKNOWN
@@ -998,6 +993,24 @@ local function UpdateDetail()
     if b.s then extra[#extra + 1] = L.ATTACK_SPEED:format(SpeedText(b.s)) end
     if b.o then extra[#extra + 1] = GREY .. L.OBSERVED_TAG .. "|r" end
     detail.speed:SetText(table.concat(extra, "   "))
+    local stableId, stableSpot, stableDist = ns.NearestStableToBeast(id)
+    local stable = detail.stable
+    stable.stableId, stable.spot, stable.dist = stableId, stableSpot, stableDist
+    stable:SetShown(stableId ~= nil)
+    if stableId then
+        local st = ns.STABLES[stableId]
+        -- the zone only when it is not the beast's own: the line has to stay short
+        local who = (ns.Names(st)) .. (st.z ~= b.z and (", " .. ns.ZoneName(st.z)) or "")
+        stable.text:SetText(GOLD .. L.STABLE_NEAR_HABITAT:format("|r" .. who))
+        local parts = {}
+        local fromYou = ns.StableDistance(stableId, stableSpot)
+        if fromYou then parts[#parts + 1] = L.STABLE_FROM_YOU:format(DistanceText(math.floor(fromYou + 0.5))) end
+        parts[#parts + 1] = stableDist < 1 and L.STABLE_AT_HABITAT
+            or L.STABLE_TO_HABITAT:format(DistanceText(math.floor(stableDist + 0.5)))
+        stable.sub:SetText(table.concat(parts, ", "))
+    end
+    detail.teachTitle:ClearAllPoints()
+    detail.teachTitle:SetPoint("TOPLEFT", stableId and stable or detail.speed, "BOTTOMLEFT", 0, -12)
     -- teaches (all ranks, ignoring filters)
     local lines = {}
     for i = 1, #b.t, 2 do
@@ -1049,9 +1062,39 @@ local function CreateDetail(parent)
     d.zone:SetPoint("TOPLEFT", d.info, "BOTTOMLEFT", 0, -3)
     d.speed = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     d.speed:SetPoint("TOPLEFT", d.zone, "BOTTOMLEFT", 0, -3)
+    -- the stable master nearest to the beast's habitat: a click sets a waypoint
+    -- two lines: who and where, then how far (from the hunter, and from there to the beast)
+    d.stable = CreateFrame("Button", nil, c)
+    d.stable:SetSize(DETAIL_W - 24, 28)
+    d.stable:SetPoint("TOPLEFT", d.speed, "BOTTOMLEFT", 0, -4)
+    d.stable.text = d.stable:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    d.stable.text:SetPoint("TOPLEFT", 0, -1)
+    d.stable.text:SetWidth(DETAIL_W - 24)
+    d.stable.text:SetJustifyH("LEFT")
+    d.stable.text:SetWordWrap(false)
+    d.stable.sub = d.stable:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    d.stable.sub:SetPoint("BOTTOMLEFT", 0, 1)
+    d.stable.sub:SetWidth(DETAIL_W - 24)
+    d.stable.sub:SetJustifyH("LEFT")
+    d.stable.sub:SetWordWrap(false)
+    local stableHl = d.stable:CreateTexture(nil, "HIGHLIGHT")
+    stableHl:SetAllPoints()
+    stableHl:SetColorTexture(1, 1, 1, 0.08)
+    d.stable:SetScript("OnClick", function(self)
+        if self.stableId then ns.SetStableWaypoint(self.stableId, self.spot) end
+    end)
+    d.stable:SetScript("OnEnter", function(self)
+        if not self.stableId then return end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine(L.STABLE_NEAR_HABITAT:format(ns.StableText(self.stableId)), 1, 1, 1, true)
+        GameTooltip:AddLine(self.sub:GetText(), 0.85, 0.85, 0.85, true)
+        GameTooltip:AddLine(L.STABLE_STRAIGHT, 0.6, 0.6, 0.6, true)
+        GameTooltip:Show()
+    end)
+    d.stable:SetScript("OnLeave", function() GameTooltip:Hide() end)
     local teachTitle = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    teachTitle:SetPoint("TOPLEFT", d.speed, "BOTTOMLEFT", 0, -12)
     teachTitle:SetText(L.TEACHES .. ":")
+    d.teachTitle = teachTitle -- anchored in UpdateDetail: under the stable line when there is one
     d.teaches = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     d.teaches:SetPoint("TOPLEFT", teachTitle, "BOTTOMLEFT", 0, -4)
     d.teaches:SetWidth(DETAIL_W - 24)
@@ -1231,6 +1274,7 @@ local function CreateSettings(parent)
     OptionCheck(p, L.OPT_MAP_PINS, 14, NextY(), "mapPins")
     OptionCheck(p, L.OPT_AREAS, 14, NextY(), "areasAlways")
     OptionCheck(p, L.OPT_TRAINERS, 14, NextY(), "trainers")
+    OptionCheck(p, L.OPT_STABLES, 14, NextY(), "stables")
     OptionCheck(p, L.OPT_NOTIFY, 14, NextY(), "notify")
     OptionCheck(p, L.OPT_HELPER, 14, NextY(), "helper")
     MakeCheck(p, L.OPT_BOTH_NAMES, 14, NextY(),

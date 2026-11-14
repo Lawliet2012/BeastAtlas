@@ -158,6 +158,85 @@ end
 check(outHas(L.MARKED:format(loc(ability("bite")) .. " 3", L.SRC_CHAT), mark), "MARKED line missing for chat")
 __advance(2)
 
+-- 3b. the same message without the rank ("[Claw]" instead of "[Claw (Rank 3)]"), as the client sometimes sends it
+do
+    local clawName = loc(ability("claw"))
+    local function learned(text) __fire("CHAT_MSG_SYSTEM", ERR_LEARN_SPELL_S:format(text)) end
+    local function link(id, text) return "|cff71d5ff|Hspell:" .. id .. ":0|h[" .. text .. "]|h|r" end
+    local keepPet, keepSpells = __U.pet, __petSpells
+    local function teacher(spells)
+        __U.pet = spells and { name = "Bear", family = loc(ns.FAMILIES.Bear), level = 21, guid = "Pet-0-1-1-1-900-0077" } or nil
+        __petSpells = spells or {}
+        __fire("UNIT_PET", "player")
+        __advance(2)
+    end
+    local claw3 = ability("claw").ranks[3].spells[1]
+
+    -- with the rank in the text and a teacher that knows another rank: the text wins
+    teacher({ petSpell("claw", 3) })
+    ns.cdb.known.claw = 2
+    learned(link(ability("claw").ranks[4].spells[1], clawName .. " (" .. rankText(4) .. ")"))
+    check(ns.KnownRank("claw") == 4, "rank from the text ignored: claw=" .. ns.KnownRank("claw"))
+
+    -- no rank in the text, a spell link of Claw 3 and no pet: the link tells the rank
+    teacher(nil)
+    ns.cdb.known.claw = 2
+    local from = #__out + 1
+    learned(link(claw3, clawName))
+    check(ns.KnownRank("claw") == 3, "rank not taken from the spell link: claw=" .. ns.KnownRank("claw"))
+    check(outHas(L.MARKED:format(clawName .. " 3", L.SRC_CHAT), from), "no MARKED line for a rank taken from the link")
+    -- a link of another ability does not count
+    ns.cdb.known.claw = 2
+    learned(link(ability("bite").ranks[4].spells[1], clawName))
+    __advance(6)
+    check(ns.KnownRank("claw") == 2, "rank taken from a link of another ability: claw=" .. ns.KnownRank("claw"))
+
+    -- no rank, no link, the teacher is out and knows Claw 3: that is the rank just learned
+    teacher({ petSpell("claw", 3), petSpell("bite", 3) })
+    ns.cdb.known.claw = 2
+    learned("[" .. clawName .. "]")
+    check(ns.KnownRank("claw") == 3, "rank not taken from the summoned teacher: claw=" .. ns.KnownRank("claw"))
+
+    -- the teacher's spellbook is not loaded yet (no rank text): resolved a moment later
+    teacher({ { clawName, "" } })
+    check(ns.petRanksPartial and ns.petRanks.claw == nil, "test setup: the pet's Claw rank should be unknown")
+    ns.cdb.known.claw = 2
+    learned("[" .. clawName .. "]")
+    check(ns.KnownRank("claw") == 2, "rank guessed while the teacher's spellbook was still loading")
+    __petSpells = { petSpell("claw", 3) }
+    __fire("SPELLS_CHANGED")
+    __advance(4)
+    check(ns.KnownRank("claw") == 3, "rank not resolved after the teacher's spellbook loaded: claw=" .. ns.KnownRank("claw"))
+
+    -- a trainer ability is bought, not learned from the pet that is out
+    teacher({ petSpell("growl", 2) })
+    ns.cdb.known.growl = 1
+    learned("[" .. loc(ability("growl")) .. "]")
+    __advance(6)
+    check(ns.KnownRank("growl") == 1, "a trainer ability took its rank from the summoned pet")
+    ns.cdb.known.growl = nil
+
+    -- nothing tells the rank: a higher rank is not guessed, and the hunter is told to mark it
+    teacher(nil)
+    ns.cdb.known.claw = 2
+    from = #__out + 1
+    learned("[" .. clawName .. "]")
+    __advance(6)
+    check(ns.KnownRank("claw") == 2, "rank guessed with nothing to go by: claw=" .. ns.KnownRank("claw"))
+    check(outHas(L.LEARNED_NO_RANK:format(clawName), from), "no hint when the rank could not be told")
+    -- ... but rank 1 is certain when the ability was not known at all
+    ns.cdb.known.claw = nil
+    learned("[" .. clawName .. "]")
+    __advance(6)
+    check(ns.KnownRank("claw") == 1, "an unknown ability learned without a rank should count as rank 1")
+
+    ns.cdb.known.claw = nil
+    __U.pet, __petSpells = keepPet, keepSpells
+    __fire("UNIT_PET", "player")
+    ns.Changed()
+    __advance(2)
+end
+
 -------------------------------------------------------------------------------
 -- 4. Beast Training window
 -------------------------------------------------------------------------------

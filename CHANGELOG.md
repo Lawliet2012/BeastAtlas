@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.1
+
+- Fixed: a rank learned from a tamed beast was not marked when the game's chat message named the ability
+  without its rank ("[Claw]" instead of "[Claw (Rank 3)]"). The rank is now taken from the spell link in the
+  message or from the pet that taught it.
+
 ## 0.6.0
 
 - **Stable masters.** To tame a beast that teaches a new rank you have to leave your own pet in a stable first,

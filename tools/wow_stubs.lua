@@ -419,6 +419,9 @@ GameTooltip.GetUnit = function() return UnitName("mouseover"), "mouseover" end
 GameTooltip.SetSpellByID = function(self, id) table.insert(self.__lines, "<spell " .. id .. ">"); return true end
 TooltipDataProcessor = { AddTooltipPostCall = function(kind, fn) __unitTooltip = fn end }
 
+if __LOCALE == "ruRU" then
+    ERR_LEARN_SPELL_S = "Вы выучили новое заклинание: \"%s\"."
+end
 if __LOCALE == "enUS" then
     ERR_LEARN_ABILITY_S = "You have learned a new ability: %s."
     ERR_LEARN_SPELL_S = "You have learned a new spell: %s."

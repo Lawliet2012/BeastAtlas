@@ -275,11 +275,56 @@ local function ParseFallback(msg)
     return best, rank
 end
 
+-- The client does not always put the rank into the message: "[Bite (Rank 3)]" one time, plain "[Claw]"
+-- another (the rank text of a spell is loaded on demand). Then the rank comes from elsewhere:
+--   1. the spell id in the message's link, when it is one of the ids the data has for a rank;
+--   2. the summoned pet: the hunter learns exactly the rank that pet has just used.
+local spellIndex -- [spellId] = { ab, rank }; ids listed for more than one rank are left out
+local function RankBySpellId(ab, id)
+    if not id then return nil end
+    if not spellIndex then
+        spellIndex = {}
+        for _, a in ipairs(ns.ABILITIES) do
+            for rank, r in pairs(a.ranks) do
+                for _, sid in ipairs(r.spells or {}) do
+                    spellIndex[sid] = spellIndex[sid] == nil and { a, rank } or false
+                end
+            end
+        end
+    end
+    local e = spellIndex[id]
+    return e and e[1] == ab and e[2] or nil
+end
+
+local function RankFromPet(ab)
+    -- trainer abilities are bought, not learned from the pet that happens to be out
+    if ab.trainer or not UnitExists("pet") then return nil end
+    return ns.petRanks[ab.key]
+end
+
+local function MarkFromChat(ab, rank)
+    local raised = {}
+    Mark(ab, rank, raised)
+    Report(raised, L.SRC_CHAT)
+end
+
+-- The pet's spellbook may still be loading (its ranks arrive a moment later): look again a few times.
+local function ResolveRankLater(ab, tries)
+    C_Timer.After(1.5, function()
+        local rank = RankFromPet(ab)
+        if rank then return MarkFromChat(ab, rank) end
+        if tries > 1 and UnitExists("pet") then return ResolveRankLater(ab, tries - 1) end
+        -- nothing tells the rank: rank 1 is certain at least, the rest is for the hunter to mark
+        if ns.KnownRank(ab.key) == 0 then MarkFromChat(ab, 1) end
+        if ab.maxRank > 1 then ns.Print(L.LEARNED_NO_RANK:format((ns.Names(ab)))) end
+    end)
+end
+
 local function OnSystemMessage(msg)
     if type(msg) ~= "string" or ns.IsSecret(msg) then return end
     if not learnPatterns then BuildPatterns() end
     if unlearnPattern and msg:match(unlearnPattern) then return end
-    local ab, rank, matched
+    local ab, rank, matched, hasRank
     for _, p in ipairs(learnPatterns) do
         local what = msg:match(p)
         if what then
@@ -288,14 +333,20 @@ local function OnSystemMessage(msg)
             what = StripLinks(what)
             local name, sub = what:match("^(.-) *%((.-)%)$")
             ab, rank = Parse(name or what, sub)
+            hasRank = sub ~= nil and sub:find("[0-9]") ~= nil
             if ab then break end
         end
     end
-    if not matched then ab, rank = ParseFallback(msg) end
+    if not matched then
+        ab, rank = ParseFallback(msg)
+        hasRank = true -- the fallback only accepts messages that end in "(... N)"
+    end
     if not ab then return end
-    local raised = {}
-    Mark(ab, rank, raised)
-    Report(raised, L.SRC_CHAT)
+    if not hasRank and ab.maxRank > 1 then
+        rank = RankBySpellId(ab, tonumber(msg:match("|Hspell:([0-9]+)"))) or RankFromPet(ab)
+        if not rank then return ResolveRankLater(ab, 3) end
+    end
+    MarkFromChat(ab, rank)
 end
 
 -------------------------------------------------------------------------------

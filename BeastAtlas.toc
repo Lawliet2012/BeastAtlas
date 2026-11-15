@@ -15,6 +15,7 @@
 
 Locale.lua
 Data\Beasts.lua
+Data\Pets.lua
 Core.lua
 Tracker.lua
 Collect.lua

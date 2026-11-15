@@ -92,7 +92,7 @@ archive into `World of Warcraft/_forever_/Interface/AddOns`.
 
 ## Данные
 
-- [Petopia Forever](https://www.wow-petopia.com/forever/) — способности, ранги, звери-учителя, скорость атаки, роли и рацион семейств, правила из гайда «Как выбрать питомца»;
+- [Petopia Forever](https://www.wow-petopia.com/forever/) — способности, ранги, звери-учителя, полный список зверей по семействам (`Data/Pets.lua`: уровни, места, приручаемость), скорость атаки, роли и рацион семейств, правила из гайда «Как выбрать питомца»;
 - tooltip-API [Wowhead Forever](https://www.wowhead.com/forever) — русские названия и координаты зверей, дрессировщиков и смотрителей стойл; список дрессировщиков и ID заклинаний способностей питомцев — снимки страниц Wowhead от 13.11.2026 (`tools/pet_spells_wowhead.txt`).
 
 В базе 375 зверей, 30 способностей, 18 дрессировщиков и 50 смотрителей стойл. У 33 рангов источник пока неизвестен, у 44 неизвестна стоимость в очках обучения (показывается «? ОО»). 34 зверя без координат (подземелья, редкие) есть в списках, но не на карте.
@@ -104,6 +104,7 @@ archive into `World of Warcraft/_forever_/Interface/AddOns`.
 ```
 pip install lupa
 python -I tools/build_db.py   # пересобрать Data/Beasts.lua (ответы кэшируются в tools/cache)
+python -I tools/build_pets.py # пересобрать Data/Pets.lua: все звери со страниц Petopia, не только учителя
 python -I tools/make_media.py # пересоздать текстуры в Media/
 python -I tools/test_load.py  # синтаксис + сценарии на заглушках API
 ```

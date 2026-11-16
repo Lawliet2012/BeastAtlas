@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.2
+
+- Added the full list of hunter pets that Petopia knows for WoW Forever: 691 creatures with their levels,
+  location, attack speed, whether they can be tamed, and Petopia's rare / elite / boss marks
+  (`Data/Pets.lua`). The atlas window itself still lists the beasts that teach ability ranks; the wider list
+  is the data the companion addon BeastScout works with.
+
 ## 0.6.1
 
 - Fixed: a rank learned from a tamed beast was not marked when the game's chat message named the ability

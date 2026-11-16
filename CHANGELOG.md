@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.0
+
+First stable release. The addon is the same as 0.7.0; from this version on the files are published as releases
+instead of betas, so the CurseForge app installs and updates them without the beta setting.
+
+What BeastAtlas does by now:
+
+- **Atlas window**: beasts nearby that teach ranks you can use, every pet ability with its ranks and teachers,
+  3D models, search, waypoints.
+- **World map**: beasts with their habitats, pet trainers and stable masters, teachers of one chosen rank.
+- **Training helper** that leads you from taming the teacher to teaching your own pet.
+- **Pet catalogue**: all families and more than 600 tameable beasts, plus the guide "How to choose a pet".
+
 ## 0.7.0
 
 - **Pet catalogue.** The Families tab now lists every beast a hunter can tame, not only the ones that teach

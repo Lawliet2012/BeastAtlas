@@ -30,8 +30,11 @@ abilities, shows where they live and tells you which ones are worth taming right
 - **Training helper.** A small panel that leads you through learning one rank: tame the teacher, fight until the
   chat says you learned it, take your main pet back, teach it at Beast Training. It knows about training points
   and tells you when you are short.
-- **Families.** All pet families by role (offense, general, defense) with their diet, attack speeds, abilities and
-  beasts, plus a short guide **"How to choose a pet"**: the fastest beasts and the ones worth taming at your level.
+- **Pet catalogue.** All pet families by role (offense, general, defense) with their diet, attack speeds and
+  abilities, and every beast a hunter can tame - more than 600, each with its 3D model, with rare and elite ones
+  marked. Plus a short guide **"How to choose a pet"**: the fastest beasts and the ones worth taming at your level.
+- **Smart picks.** Beasts that teach several ranks you need at once are marked, and one click shows all teachers
+  of a chosen rank on the map.
 - **Chat tips** when your pet levels up or you enter a zone with beasts that teach something new.
 
 The addon tracks what you have learned by itself (chat messages, the Beast Training window) and plans for your

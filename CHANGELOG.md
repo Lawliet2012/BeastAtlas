@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.0
+
+- **Pet catalogue.** The Families tab now lists every beast a hunter can tame, not only the ones that teach
+  ability ranks: more than 600 pets with their level, place, attack speed and 3D model. Rare, elite and spawned
+  beasts are marked, and a checkbox leaves only them. The search box on this tab looks through all pets by
+  name, family and place.
+- **Several ranks from one tame.** A beast that teaches two or more ranks you need right now is marked
+  "2 at once" in the Nearby list and comes first in its zone.
+- **Teachers of one rank on the map.** The "On map" button next to a rank in the Abilities tab leaves only the
+  beasts that teach that rank on the map, with their habitats; continent maps show which zones they live in.
+  A bar on the map brings all beasts back.
+
 ## 0.6.2
 
 - Added the full list of hunter pets that Petopia knows for WoW Forever: 691 creatures with their levels,

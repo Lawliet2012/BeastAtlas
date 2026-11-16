@@ -279,6 +279,26 @@ local function ForMySide(t, side)
     return not t.side or not side or t.side == side
 end
 
+-- A creature of the atlas: its teacher entry (ns.BEASTS) when it is one, else its entry in the wider list of
+-- every pet Petopia knows (ns.PETS). The two tables stay as they are: other addons read them.
+function ns.Creature(id)
+    return ns.BEASTS[id] or (ns.PETS and ns.PETS[id]) or nil
+end
+
+-- Can a hunter of this level tame it? true, or false and the reason: "never" (cannot be tamed at all),
+-- "side" (only the other faction's hunters can), "unknown" (its level is not known), "level" (above the hunter).
+function ns.TameState(id, playerLevel)
+    local e = ns.Creature(id)
+    if not e then return false, "never" end
+    local pet = ns.PETS and ns.PETS[id]
+    if pet and pet.tame == false then return false, "never" end
+    local side = PlayerSide()
+    if pet and pet.side and side and pet.side ~= side then return false, "side" end
+    if e.l[1] <= 0 then return false, "unknown" end
+    if e.l[1] > playerLevel then return false, "level" end
+    return true
+end
+
 -- [uiMapID] = { npcId, ... } for the entries of src whose zone has a map in this client
 local function ServicesByMap(src)
     local out, side = {}, PlayerSide()
@@ -646,22 +666,85 @@ end
 -------------------------------------------------------------------------------
 -- Waypoints / world map
 -------------------------------------------------------------------------------
+local function OpenMap(mapID)
+    if OpenWorldMap then
+        OpenWorldMap(mapID)
+    else
+        if not WorldMapFrame:IsShown() then
+            if ToggleWorldMap then ToggleWorldMap() else ShowUIPanel(WorldMapFrame) end
+        end
+        WorldMapFrame:SetMapID(mapID)
+    end
+end
+
 function ns.OpenMapFor(id)
     local b = ns.BEASTS[id]
     local mapID = b and ns.ZoneMap(b.z)
+    ns.focus = nil -- one beast was asked for: a rank filter would hide it
     ns.highlight = id
-    if mapID then
-        if OpenWorldMap then
-            OpenWorldMap(mapID)
-        else
-            if not WorldMapFrame:IsShown() then
-                if ToggleWorldMap then ToggleWorldMap() else ShowUIPanel(WorldMapFrame) end
-            end
-            WorldMapFrame:SetMapID(mapID)
-        end
-    end
+    if mapID then OpenMap(mapID) end
     ns.Fire("MAP_REFRESH")
     return mapID ~= nil
+end
+
+-- The beasts that teach a rank and can be shown on a zone map: { npcId, ... }, lowest level first.
+function ns.RankTeachersOnMap(key, rank)
+    local ab = ns.Ability(key)
+    local r = ab and ab.ranks[rank]
+    local out = {}
+    for _, id in ipairs(r and r.beasts or {}) do
+        local b = ns.BEASTS[id]
+        if b and #b.c > 0 and ns.ZoneMap(b.z) then out[#out + 1] = id end
+    end
+    table.sort(out, function(a, b)
+        local la, lb = ns.BEASTS[a].l[1], ns.BEASTS[b].l[1]
+        if la ~= lb then return la < lb end
+        return a < b
+    end)
+    return out
+end
+
+-- Map focus: until it is cleared, the map shows only the teachers of one rank (whatever the filters say).
+-- ns.focus = { key, rank, label = "Bite 4", ids = { [npcId] = true }, zones = { { zone, count }, ... } }
+function ns.FocusRank(key, rank)
+    local ids = ns.RankTeachersOnMap(key, rank)
+    if #ids == 0 then
+        ns.Print(L.FOCUS_NONE)
+        return false
+    end
+    local focus = { key = key, rank = rank, label = (ns.Names(ns.Ability(key))) .. " " .. rank, ids = {}, zones = {} }
+    local perZone = {}
+    for _, id in ipairs(ids) do
+        focus.ids[id] = true
+        local z = ns.BEASTS[id].z
+        if not perZone[z] then
+            perZone[z] = { zone = z, count = 0 }
+            focus.zones[#focus.zones + 1] = perZone[z]
+        end
+        perZone[z].count = perZone[z].count + 1
+    end
+    -- open the zone of the nearest teacher; on another continent or in an instance, of the lowest one
+    local cont, px, py = ns.PlayerWorldPos()
+    local mapID, best
+    for _, id in ipairs(ids) do
+        local d = ns.BeastDistance(id, cont, px, py)
+        if d and (not best or d < best) then mapID, best = ns.ZoneMap(ns.BEASTS[id].z), d end
+    end
+    mapID = mapID or ns.ZoneMap(ns.BEASTS[ids[1]].z)
+    ns.highlight = nil
+    ns.focus = focus
+    local parts = {}
+    for i, z in ipairs(focus.zones) do parts[i] = ns.ZoneName(z.zone) .. ": " .. z.count end
+    ns.Print(L.FOCUS_ON:format(focus.label, table.concat(parts, ", ")))
+    OpenMap(mapID)
+    ns.Fire("MAP_REFRESH")
+    return true
+end
+
+function ns.ClearFocus()
+    if not ns.focus then return end
+    ns.focus = nil
+    ns.Fire("MAP_REFRESH")
 end
 
 function ns.ClearHighlight()

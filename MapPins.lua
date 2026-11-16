@@ -137,12 +137,20 @@ local function AddBeastLines(tt, id)
     if b.s then famName = famName .. "  |cffaaaaaa" .. L.ATTACK_SPEED:format(b.s) .. "|r" end
     tt:AddLine(famName, 0.8, 0.8, 0.8)
     local _, list = ns.BeastInfo(id)
-    if not list then return end
-    for _, e in ipairs(list) do
+    local focus = ns.focus
+    local focusShown = false
+    for _, e in ipairs(list or {}) do
         local ab = ns.Ability(e.key)
         local note = ns.StatusNote(e.status, e.key, e.rank, e.tame)
         tt:AddDoubleLine("  " .. ns.StatusHex(e.status) .. (ns.Names(ab)) .. " " .. e.rank .. "|r",
             ns.StatusHex(e.status) .. note .. "|r")
+        if focus and e.key == focus.key and e.rank == focus.rank then focusShown = true end
+    end
+    -- the rank the map is filtered by, also when the window's filters leave it out of the list above
+    if focus and focus.ids[id] and not focusShown then
+        local st, tame = ns.BeastRankStatus(id, focus.key, focus.rank)
+        tt:AddDoubleLine("  " .. ns.StatusHex(st) .. focus.label .. "|r",
+            ns.StatusHex(st) .. ns.StatusNote(st, focus.key, focus.rank, tame) .. "|r")
     end
 end
 
@@ -288,11 +296,12 @@ end
 
 function BeastAtlasZonePinMixin:OnAcquired(summary)
     self.summary = summary
-    local st = summary.ready > 0 and S.READY or S.SOON
-    local c = ns.STATUS_COLOR[st]
+    -- with a rank focus: how many of its teachers live in the zone, coloured by the best of them
+    local st = summary.focus and summary.status or (summary.ready > 0 and S.READY or S.SOON)
+    local c = ns.STATUS_COLOR[st] or ns.STATUS_COLOR[S.LATER]
     self.Ring:SetVertexColor(c[1], c[2], c[3], 1)
     self.Count:SetTextColor(c[1], c[2], c[3])
-    self.Count:SetText(summary.ready > 0 and summary.ready or summary.soon)
+    self.Count:SetText(summary.focus and summary.count or (summary.ready > 0 and summary.ready or summary.soon))
     self:SetPosition(summary.x, summary.y)
 end
 
@@ -301,6 +310,13 @@ function BeastAtlasZonePinMixin:OnMouseEnter()
     local tt = GameTooltip
     tt:SetOwner(self, "ANCHOR_RIGHT")
     tt:AddLine(ns.ZoneName(ns.ZoneByMap(sm.mapID)), 1, 0.82, 0)
+    if sm.focus then
+        local c = ns.STATUS_COLOR[sm.status] or ns.STATUS_COLOR[S.LATER]
+        tt:AddLine(L.FOCUS_ZONE:format(sm.focus, sm.count), c[1], c[2], c[3])
+        tt:AddLine(L.ZONE_PIN_HINT, 0.5, 0.5, 0.5)
+        tt:Show()
+        return
+    end
     if sm.ready > 0 then
         local c = ns.STATUS_COLOR[S.READY]
         tt:AddLine(L.ZONE_READY:format(sm.ready), c[1], c[2], c[3])
@@ -372,15 +388,23 @@ function Provider:RefreshZone(map, mapID)
     if not ids then return end
 
     local spots = {}
+    local focus = ns.focus
     for _, id in ipairs(ids) do
         local highlighted = ns.highlight == id
-        local best = ns.BeastUseful(id)
-        if highlighted and not best then best = ns.BeastInfo(id) or S.LATER end
-        if best and (ns.db.mapPins or highlighted) then
+        local best
+        if focus then
+            -- only the teachers of the chosen rank, coloured by what that rank is to the hunter
+            best = focus.ids[id] and ns.BeastRankStatus(id, focus.key, focus.rank) or nil
+        else
+            best = ns.BeastUseful(id)
+            if highlighted and not best then best = ns.BeastInfo(id) or S.LATER end
+        end
+        if best and (ns.db.mapPins or highlighted or focus) then
             local c = ns.BEASTS[id].c
             for i = 1, #c, 3 do
                 local x, y, r = c[i] / 1000, c[i + 1] / 1000, c[i + 2] / 1000
-                map:AcquirePin(AREA_TEMPLATE, x, y, r, best, id, ns.db.areasAlways or highlighted, highlighted)
+                -- the few beasts of a focus are shown with their habitats
+                map:AcquirePin(AREA_TEMPLATE, x, y, r, best, id, ns.db.areasAlways or highlighted or focus ~= nil, highlighted)
                 spots[#spots + 1] = { x = x, y = y, id = id, status = best, cluster = i, highlighted = highlighted }
             end
         end
@@ -436,7 +460,29 @@ local function ZoneCentre(zoneMapID, continentMapID)
 end
 
 function Provider:RefreshContinent(map, mapID)
-    if not ns.db.mapPins or not C_Map.GetMapRectOnMap then return end
+    if not C_Map.GetMapRectOnMap then return end
+    local focus = ns.focus
+    if focus then
+        -- one pin per zone where a teacher of the chosen rank lives
+        for zoneMapID, ids in pairs(ns.BeastsByMap()) do
+            local count, status = 0, nil
+            for _, id in ipairs(ids) do
+                if focus.ids[id] then
+                    count = count + 1
+                    local st = ns.BeastRankStatus(id, focus.key, focus.rank)
+                    if not status or st < status then status = st end
+                end
+            end
+            local x, y
+            if count > 0 then x, y = ZoneCentre(zoneMapID, mapID) end
+            if x then
+                map:AcquirePin(ZONE_TEMPLATE, { mapID = zoneMapID, x = x, y = y, focus = focus.label, count = count,
+                    status = status, ready = 0, soon = 0, readyIds = {} })
+            end
+        end
+        return
+    end
+    if not ns.db.mapPins then return end
     for zoneMapID, ids in pairs(ns.BeastsByMap()) do
         local ready, soon, readyIds = 0, 0, nil
         for _, id in ipairs(ids) do
@@ -528,6 +574,31 @@ ns.On("LOGIN", function()
     if not (WorldMapFrame and WorldMapFrame.AddDataProvider and MapCanvasDataProviderMixin) then return end
     WorldMapFrame:AddDataProvider(Provider)
     ns.mapButton = CreateMapButton()
+
+    -- While a rank focus is on, a bar on the map says so; a click on it shows everything again.
+    local parent = WorldMapFrame.ScrollContainer or WorldMapFrame
+    local bar = CreateFrame("Button", "BeastAtlasMapFocus", parent)
+    bar:SetHeight(22)
+    bar:SetPoint("TOPRIGHT", ns.mapButton, "TOPLEFT", -6, -3)
+    bar:SetFrameStrata("HIGH")
+    local barBg = bar:CreateTexture(nil, "BACKGROUND")
+    barBg:SetAllPoints()
+    barBg:SetColorTexture(0, 0, 0, 0.75)
+    local barHl = bar:CreateTexture(nil, "HIGHLIGHT")
+    barHl:SetAllPoints()
+    barHl:SetColorTexture(1, 1, 1, 0.12)
+    bar.text = bar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    bar.text:SetPoint("CENTER")
+    bar:SetScript("OnClick", function() ns.ClearFocus() end)
+    bar:Hide()
+    ns.On("MAP_REFRESH", function()
+        local focus = ns.focus
+        bar:SetShown(focus ~= nil)
+        if focus then
+            bar.text:SetText("|cffffd100" .. L.FOCUS_BAR:format(focus.label) .. "|r  " .. L.FOCUS_BAR_CLEAR)
+            bar:SetWidth((bar.text:GetStringWidth() or 200) + 18)
+        end
+    end)
     WorldMapFrame:HookScript("OnHide", function() ns.ClearHighlight() end)
 
     local queued

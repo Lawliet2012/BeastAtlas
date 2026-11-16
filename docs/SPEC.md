@@ -43,6 +43,14 @@ v0.1 exists in this folder. This spec fixes the review findings. Each executor o
 >   (`OnAcquired(kind, id, spot, dx)`; everything kind-specific is set there because pins are pooled).
 >   Distances are straight lines. Zones without a known uiMapID (Riverglades, Mount Hyjal) are looked up by
 >   area name; when that fails their stable masters are skipped everywhere.
+> - v0.7: `ns.Creature(id)` (teacher entry or `ns.PETS` entry) and `ns.TameState(id, level)` -> true | false, reason
+>   ("never", "side", "unknown", "level"); the Families tab lists every creature a hunter of the player's faction
+>   can tame (`EachPet` in UI.lua), with `state.rareOnly` and a search over the whole list; pets of the wider list
+>   have no coordinates, so no distance, map button or stable line. `ns.BEASTS` and `ns.PETS` keep their shapes:
+>   the companion addon BeastScout reads them through the global `BeastAtlas`.
+>   Map focus: `ns.FocusRank(key, rank)` / `ns.ClearFocus()` / `ns.focus`; while it is set the map shows only the
+>   teachers of that rank (also with `mapPins` off, and as zone pins on continent maps). `ns.RankTeachersOnMap`.
+>   Nearby rows carry `ready` = number of READY ranks the beast teaches.
 > - Other client languages: `ns.LearnFamily` (family names learned from tooltips of known beasts, saved in
 >   `BeastAtlasDB.familyNames`) and the client's own spell names are accepted by `ns.AbilityByName`.
 

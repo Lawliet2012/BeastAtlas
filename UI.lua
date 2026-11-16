@@ -24,12 +24,15 @@ local TEXT_MIN_H = 20
 local ROLE_ORDER = { "O", "G", "D" }     -- Petopia's family categories: offense, general, defense
 local CLOSE_LEVELS = 3                    -- a pet keeps the level it was tamed at: suggest beasts this close
 local PER_ROLE, FASTEST_MAX = 2, 5
+local PET_SEARCH_MAX = 200                -- rows of a search over the whole pet list
 local USUAL_SPEED = 2.0                   -- the attack speed most beasts have
 local NEUTRAL, TAMEABLE = { 0.55, 0.55, 0.55 }, { 0.30, 1.00, 0.30 }
 
 local frame, state
 -- family: the family shown on the Families tab; nil = the "how to choose a pet" guide
-state = { tab = "nearby", ability = nil, beast = nil, family = nil, search = "", stack = nil, expanded = {} }
+-- rareOnly: the Families tab lists only the beasts Petopia marks as rare, elite or otherwise special
+state = { tab = "nearby", ability = nil, beast = nil, family = nil, search = "", stack = nil, expanded = {},
+    rareOnly = false }
 
 -------------------------------------------------------------------------------
 -- helpers
@@ -46,6 +49,7 @@ local function Matches(q, ...)
 end
 
 local function LevelText(b)
+    if b.l[1] <= 0 then return "??" end -- level unknown
     return b.l[1] == b.l[2] and tostring(b.l[1]) or (b.l[1] .. "-" .. b.l[2])
 end
 
@@ -94,7 +98,7 @@ local function SetModelBeast(m, id)
     m.npcId = id
     m.fallback:Hide()
     m:ClearModel()
-    local b = ns.BEASTS[id]
+    local b = ns.Creature(id)
     if not b then return end
     m.fallback:SetTexture(ns.FamilyIcon(b.f))
     m:SetCreature(id)
@@ -214,15 +218,36 @@ local function BuildRow(r, onClick)
     r:SetScript("OnEnter", function(self)
         local d = self.data
         if d and d.kind == "pet" then return PetTooltip(self, d) end
-        if not d or not (d.tip or d.spell or d.fallbackTip) then return end
+        local multi = d and (d.ready or 0) >= 2
+        if not d or not (d.tip or d.spell or d.fallbackTip or multi) then return end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         -- the game's own tooltip of the ability (in the client's language), when we know its spell
         local native = d.spell and GameTooltip.SetSpellByID and GameTooltip:SetSpellByID(d.spell)
         if not native and d.fallbackTip then GameTooltip:AddLine(d.fallbackTip, 0.8, 0.8, 0.8, true) end
+        if multi then GameTooltip:AddLine(L.MULTI_TIP:format(d.ready), 1, 0.82, 0, true) end
         if d.tip then GameTooltip:AddLine(d.tip, 0.6, 0.6, 0.6, true) end
         GameTooltip:Show()
     end)
     r:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    -- rank headers: show the teachers of this rank on the map
+    r.mapBtn = CreateFrame("Button", nil, r, "UIPanelButtonTemplate")
+    r.mapBtn:SetSize(72, 17)
+    r.mapBtn:SetPoint("BOTTOMRIGHT", -5, 3)
+    r.mapBtn:SetNormalFontObject("GameFontHighlightSmall")
+    r.mapBtn:SetHighlightFontObject("GameFontHighlightSmall")
+    r.mapBtn:SetText(L.ON_MAP)
+    r.mapBtn:SetScript("OnClick", function(self)
+        local row = self:GetParent().data
+        if row and row.kind == "header" then ns.FocusRank(row.ab.key, row.rank) end
+    end)
+    r.mapBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine(L.FOCUS_BUTTON_TIP, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    r.mapBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    r.mapBtn:Hide()
 end
 
 -- Rows are recycled between kinds: re-anchor the texts only when the kind changes.
@@ -349,6 +374,15 @@ local function TeachText(list, max)
     return table.concat(parts, ", ")
 end
 
+-- How many ranks worth learning now a beast teaches: with two or more, one tame does the work of several.
+local function ReadyCount(list)
+    local n = 0
+    for _, e in ipairs(list or {}) do
+        if e.status == S.READY then n = n + 1 end
+    end
+    return n
+end
+
 local function SetStatusBorder(r, status)
     local c = ns.STATUS_COLOR[status] or ns.STATUS_COLOR[S.LATER]
     r.border:SetVertexColor(c[1], c[2], c[3], 1)
@@ -365,7 +399,10 @@ local function BeastRow(r, d)
     local main, second = ns.DisplayName(b)
     r.text:SetText(ns.StatusHex(status) .. main .. "|r  " .. LevelText(b) .. (second and ("  " .. GREY .. second .. "|r") or ""))
     SetRight(r, d.dist and DistanceText(d.dist) or (GREY .. ns.ZoneName(b.z) .. "|r"))
-    r.sub:SetText(TeachText(d.list) .. (d.dist and ("  " .. GREY .. ns.ZoneName(b.z) .. "|r") or ""))
+    -- at the start of the line, where a long list of ranks cannot push it out of sight
+    d.ready = ReadyCount(d.list)
+    local multi = d.ready >= 2 and (GOLD .. L.MULTI:format(d.ready) .. "|r ") or ""
+    r.sub:SetText(multi .. TeachText(d.list) .. (d.dist and ("  " .. GREY .. ns.ZoneName(b.z) .. "|r") or ""))
     r.sel:SetShown(state.beast == d.id)
 end
 
@@ -400,6 +437,9 @@ local function HeaderRow(r, d)
     r.text:SetText(ns.StatusHex(d.status) .. L.RANK:format(d.rank) .. "|r  " .. L.PET_LEVEL:format(rank.lvl)
         .. "  " .. CostText(rank.tp))
     r.sub:SetText("|cffaaaaaa" .. SpellDesc(rank) .. "|r")
+    -- the button sits at the end of the description line
+    r.mapBtn:SetShown(d.onMap and true or false)
+    r.sub:SetPoint("BOTTOMRIGHT", d.onMap and -82 or -6, 5)
     if trainer and d.status ~= S.LEARNED then
         SetRight(r, GREY .. L.TRAINER_ONLY .. "|r")
     else
@@ -462,17 +502,50 @@ local function KnowsText(b)
     return table.concat(parts, ", ")
 end
 
+-- Where a creature lives: the zone in the client's language and, when Petopia says more, its own text.
+-- (A teacher carries a zone key; the wider list a text such as "Jasperlode Mine, Elwynn Forest".)
+local function PlaceOf(id)
+    local b = ns.BEASTS[id]
+    if b then return ns.ZoneName(b.z) end
+    local p = ns.PETS and ns.PETS[id]
+    if not p or not p.z or p.z == "" then return L.ZONE_UNKNOWN end
+    local first = p.z:match("^([^;]+)") or p.z -- "Westfall; Redridge Mountains": the first of them
+    local zone = (first:match("([^,]+)$") or first):match("^%s*(.-)%s*$")
+    if ns.ZONES[zone] then return ns.ZoneName(zone), p.z ~= zone and p.z or nil end
+    return p.z
+end
+
+-- "rare", "elite", ... : Petopia's mark, whichever of the two lists the creature is in
+local function TagText(id)
+    local p = ns.PETS and ns.PETS[id]
+    return p and p.tag and (L["TAG_" .. p.tag] or p.tag) or nil
+end
+
+-- why a beast cannot be tamed right now, for a row or a tooltip
+local function WhyNotText(d, e)
+    if d.why == "level" then return L.TAME_AT:format(e.l[1]), L.TAME_FROM:format(e.l[1]) end
+    if d.why == "never" then return L.PET_NEVER, L.PET_NEVER end
+    if d.why == "side" then
+        local p = ns.PETS[d.id]
+        local text = p and p.side == "A" and L.PET_SIDE_A or L.PET_SIDE_H
+        return text, text
+    end
+    return nil
+end
+
 -- A beast as a pet to keep (Families tab): the colour says whether it can be tamed now,
 -- not which ranks it teaches - that is what the other tabs are for.
 local function PetRow(r, d)
     Layout(r, "beast")
-    local b = ns.BEASTS[d.id]
+    local b = ns.Creature(d.id)
     r.icon:SetTexture(ns.FamilyIcon(b.f))
     local c = d.tame and TAMEABLE or NEUTRAL
     r.border:SetVertexColor(c[1], c[2], c[3], 1)
     r.text:SetFontObject("GameFontHighlight")
     local main, second = ns.DisplayName(b)
+    local tag = TagText(d.id)
     r.text:SetText((d.tame and main or (GREY .. main .. "|r")) .. "  " .. LevelText(b)
+        .. (tag and ("  " .. GOLD .. tag .. "|r") or "")
         .. (second and ("  " .. GREY .. second .. "|r") or ""))
     -- only the distance on the right: a zone name there would squeeze the beast's name and level
     SetRight(r, d.dist and DistanceText(d.dist) or "")
@@ -480,15 +553,16 @@ local function PetRow(r, d)
     local fam = ns.FAMILIES[b.f]
     if d.role and fam then parts[#parts + 1] = GOLD .. (ns.Names(fam)) .. ", " .. L["ROLE_" .. fam.role] .. "|r" end
     if b.s then parts[#parts + 1] = L.PET_SPEED:format(SpeedText(b.s)) end
-    if not d.tame then parts[#parts + 1] = RED .. L.TAME_FROM:format(b.l[1]) .. "|r" end
-    if d.knows then parts[#parts + 1] = GREY .. L.PET_KNOWS:format(KnowsText(b)) .. "|r" end
-    parts[#parts + 1] = GREY .. ns.ZoneName(b.z) .. "|r" -- last: the first thing to go when the line is full
+    local _, why = WhyNotText(d, b)
+    if why then parts[#parts + 1] = (d.why == "level" and RED or GREY) .. why .. "|r" end
+    if d.knows and b.t then parts[#parts + 1] = GREY .. L.PET_KNOWS:format(KnowsText(b)) .. "|r" end
+    parts[#parts + 1] = GREY .. PlaceOf(d.id) .. "|r" -- last: the first thing to go when the line is full
     r.sub:SetText(table.concat(parts, "  "))
     r.sel:SetShown(state.beast == d.id)
 end
 
 PetTooltip = function(owner, d)
-    local b = ns.BEASTS[d.id]
+    local b = ns.Creature(d.id)
     if not b then return end
     local fam = ns.FAMILIES[b.f]
     local main, second = ns.Names(b)
@@ -496,17 +570,24 @@ PetTooltip = function(owner, d)
     GameTooltip:AddLine(main, 1, 1, 1)
     if second and second ~= main then GameTooltip:AddLine(second, 0.55, 0.55, 0.55) end
     if fam then GameTooltip:AddLine((ns.Names(fam)) .. ", " .. L["ROLE_" .. fam.role], 1, 0.82, 0) end
-    GameTooltip:AddLine(L.LEVEL:format(LevelText(b)), 0.85, 0.85, 0.85)
-    local where = ns.ZoneName(b.z)
+    local tag = TagText(d.id)
+    GameTooltip:AddLine(L.LEVEL:format(LevelText(b)) .. (tag and (", " .. tag) or ""), 0.85, 0.85, 0.85)
+    local where, more = PlaceOf(d.id)
     if d.dist and d.dist > 0 then where = where .. ", " .. DistanceText(d.dist) end
     GameTooltip:AddLine(where, 0.85, 0.85, 0.85, true)
+    if more then GameTooltip:AddLine(more, 0.6, 0.6, 0.6, true) end
     if b.s then GameTooltip:AddLine(L.ATTACK_SPEED:format(SpeedText(b.s)), 0.85, 0.85, 0.85) end
-    local knows = KnowsText(b)
-    if knows ~= "" then GameTooltip:AddLine(L.PET_KNOWS:format(knows), 0.85, 0.85, 0.85, true) end
+    local knows = b.t and KnowsText(b) or ""
+    if knows ~= "" then
+        GameTooltip:AddLine(L.PET_KNOWS:format(knows), 0.85, 0.85, 0.85, true)
+    else
+        GameTooltip:AddLine(L.PET_NO_RANKS, 0.6, 0.6, 0.6, true)
+    end
     if d.tame then
         GameTooltip:AddLine(L.PET_CAN_TAME, 0.3, 1, 0.3)
     else
-        GameTooltip:AddLine(L.TAME_AT:format(b.l[1]), 1, 0.38, 0.38)
+        local why = WhyNotText(d, b)
+        if why then GameTooltip:AddLine(why, 1, 0.38, 0.38) end
     end
     if d.tip then GameTooltip:AddLine(d.tip, 0.6, 0.6, 0.6, true) end
     GameTooltip:Show()
@@ -530,6 +611,8 @@ local lastPos -- player position at the last Nearby build: { cont, x, y }
 
 local function ByStatusThenDist(a, b)
     if a.status ~= b.status then return a.status < b.status end
+    -- among the beasts worth taming now, the ones that teach more needed ranks at once come first
+    if (a.ready or 0) ~= (b.ready or 0) then return (a.ready or 0) > (b.ready or 0) end
     if (a.dist ~= nil) ~= (b.dist ~= nil) then return a.dist ~= nil end
     if a.dist and b.dist and a.dist ~= b.dist then return a.dist < b.dist end
     return ns.BEASTS[a.id].l[1] < ns.BEASTS[b.id].l[1]
@@ -576,7 +659,7 @@ local function BuildNearby()
             end
             if ok then
                 local dist = ns.BeastDistance(id, cont, px, py)
-                local e = { id = id, status = best, list = list, dist = dist,
+                local e = { id = id, status = best, list = list, dist = dist, ready = ReadyCount(list),
                     tip = (#b.c == 0) and L.NO_COORDS or nil }
                 if zoneMap and ns.ZoneMap(b.z) == zoneMap then
                     here[#here + 1] = e
@@ -662,7 +745,7 @@ local function BuildRanks(ab)
             local collapsible = st == S.OBSOLETE or (st == S.LEARNED and not ns.db.showLearned)
             local k = ab.key .. ":" .. rank
             out[#out + 1] = { kind = "header", ab = ab, rank = rank, status = st, collapsible = collapsible,
-                expandKey = k, spell = r.spell, fallbackTip = r.desc,
+                expandKey = k, spell = r.spell, fallbackTip = r.desc, onMap = #ns.RankTeachersOnMap(ab.key, rank) > 0,
                 tip = not ab.trainer and L.RIGHTCLICK_TOGGLE or nil }
             if not collapsible or state.expanded[k] then
                 local beasts = {}
@@ -712,10 +795,21 @@ local function TextEntry(text)
     return { kind = "text", text = text, height = TextHeight(text) }
 end
 
--- [family] = { ids = { npcId, ... }, count, minLevel, maxLevel, fast, slow } for the beasts of the atlas
+-- Every creature a hunter of the player's faction can tame at some level: the teachers and the rest of
+-- Petopia's list. fn(npcId, entry)
+local function EachPet(fn)
+    for id, b in pairs(ns.BEASTS) do
+        if ns.TameState(id, 1000) then fn(id, b) end
+    end
+    for id, p in pairs(ns.PETS or {}) do
+        if not ns.BEASTS[id] and ns.TameState(id, 1000) then fn(id, p) end
+    end
+end
+
+-- [family] = { ids = { npcId, ... }, count, minLevel, maxLevel, fast, slow } over all those creatures
 local function FamilyStats()
     local stats = {}
-    for id, b in pairs(ns.BEASTS) do
+    EachPet(function(id, b)
         local st = stats[b.f]
         if not st then
             st = { ids = {}, count = 0, minLevel = b.l[1], maxLevel = b.l[2] }
@@ -729,7 +823,7 @@ local function FamilyStats()
             st.fast = math.min(st.fast or b.s, b.s)
             st.slow = math.max(st.slow or b.s, b.s)
         end
-    end
+    end)
     return stats
 end
 
@@ -768,15 +862,16 @@ local function BuildFamilies()
 end
 
 local function PetEntry(id, playerLevel, cont, px, py)
-    local b = ns.BEASTS[id]
-    return { kind = "pet", id = id, tame = b.l[1] <= playerLevel, dist = ns.BeastDistance(id, cont, px, py),
-        tip = (#b.c == 0) and L.NO_COORDS or nil }
+    local b = ns.BEASTS[id] -- only a teacher has coordinates, and so a distance
+    local tame, why = ns.TameState(id, playerLevel)
+    return { kind = "pet", id = id, tame = tame, why = why, dist = b and ns.BeastDistance(id, cont, px, py) or nil,
+        tip = (b and #b.c == 0) and L.NO_COORDS or nil }
 end
 
--- can be tamed now first (nearest first), then the rest by level
+-- can be tamed now first (nearest first, then the higher level), then the rest by level
 local function ByTameThenDist(a, b)
     if a.tame ~= b.tame then return a.tame end
-    local la, lb = ns.BEASTS[a.id].l, ns.BEASTS[b.id].l
+    local la, lb = ns.Creature(a.id).l, ns.Creature(b.id).l
     if a.tame then
         if (a.dist ~= nil) ~= (b.dist ~= nil) then return a.dist ~= nil end
         if a.dist and b.dist and a.dist ~= b.dist then return a.dist < b.dist end
@@ -826,14 +921,48 @@ local function BuildFamilyCard(key, st)
     out[#out + 1] = TextEntry(GREY .. L.FAM_TRAINER_NOTE .. "|r")
 
     local pets = {}
-    for i, id in ipairs(st.ids) do
-        pets[i] = PetEntry(id, ctx.playerLevel, cont, px, py)
-        pets[i].knows = true
+    for _, id in ipairs(st.ids) do
+        if not state.rareOnly or TagText(id) then
+            local e = PetEntry(id, ctx.playerLevel, cont, px, py)
+            e.knows = true
+            pets[#pets + 1] = e
+        end
     end
     table.sort(pets, ByTameThenDist)
-    out[#out + 1] = { kind = "group", text = L.FAM_BEASTS:format(#pets) }
-    out[#out + 1] = TextEntry(GREY .. L.FAM_BEASTS_NOTE .. "|r")
+    out[#out + 1] = { kind = "group", text = (state.rareOnly and L.FAM_BEASTS_RARE or L.FAM_BEASTS):format(#pets) }
+    out[#out + 1] = TextEntry(GREY .. (#pets > 0 and L.FAM_BEASTS_NOTE or L.FAM_NONE_RARE) .. "|r")
     for _, e in ipairs(pets) do out[#out + 1] = e end
+    return out
+end
+
+-- The search box on the Families tab looks through every pet: name, family, place.
+local function BuildPetSearch(q)
+    local ctx = ns.Ctx()
+    local cont, px, py = ns.PlayerWorldPos()
+    local found = {}
+    EachPet(function(id, b)
+        if not state.rareOnly or TagText(id) then
+            local fam = ns.FAMILIES[b.f]
+            local place, more = PlaceOf(id)
+            if Matches(q, b.en, b.ru, fam and fam.en, fam and fam.ru, place, more) then
+                local e = PetEntry(id, ctx.playerLevel, cont, px, py)
+                e.role, e.knows = true, true
+                found[#found + 1] = e
+            end
+        end
+    end)
+    table.sort(found, ByTameThenDist)
+    local out = {}
+    if #found == 0 then
+        out[1] = { kind = "group", text = L.PET_FOUND:format(0) }
+        out[2] = TextEntry(GREY .. L.PET_NOT_FOUND .. "|r")
+        return out
+    end
+    local shown = math.min(#found, PET_SEARCH_MAX)
+    local title = shown < #found and L.PET_FOUND_MORE:format(#found, shown) or L.PET_FOUND:format(#found)
+    if q == "" then title = L.FAM_BEASTS_RARE:format(#found) end -- no query: the rare filter over every family
+    out[1] = { kind = "group", text = title }
+    for i = 1, shown do out[#out + 1] = found[i] end
     return out
 end
 
@@ -878,11 +1007,11 @@ local function BuildGuide()
     Head(L.GUIDE_H_SPEED)
     Text(L.GUIDE_SPEED)
     local fastest = {}
-    for id, b in pairs(ns.BEASTS) do
+    EachPet(function(id, b)
         if b.s then fastest[#fastest + 1] = id end
-    end
+    end)
     table.sort(fastest, function(a, b)
-        local ba, bb = ns.BEASTS[a], ns.BEASTS[b]
+        local ba, bb = ns.Creature(a), ns.Creature(b)
         if ba.s ~= bb.s then return ba.s < bb.s end
         if ba.l[1] ~= bb.l[1] then return ba.l[1] < bb.l[1] end
         return a < b
@@ -899,11 +1028,11 @@ local function BuildGuide()
     if level >= 10 and not allTame then
         local now = {}
         for _, id in ipairs(fastest) do
-            local b = ns.BEASTS[id]
-            if b.s < USUAL_SPEED and b.l[1] <= level then now[#now + 1] = id end
+            local b = ns.Creature(id)
+            if b.s < USUAL_SPEED and ns.TameState(id, level) then now[#now + 1] = id end
         end
         table.sort(now, function(a, b)
-            local ba, bb = ns.BEASTS[a], ns.BEASTS[b]
+            local ba, bb = ns.Creature(a), ns.Creature(b)
             if ba.s ~= bb.s then return ba.s < bb.s end
             if ba.l[2] ~= bb.l[2] then return ba.l[2] > bb.l[2] end
             return a < b
@@ -963,10 +1092,13 @@ local function BuildGuide()
 end
 
 local function BuildFamilyPane()
+    if state.search ~= "" then return BuildPetSearch(state.search) end
     local key = state.family
     local st = key and ns.FAMILIES[key] and FamilyStats()[key]
     if st then return BuildFamilyCard(key, st) end
     state.family = nil -- nothing chosen, or a family the atlas has no beasts of
+    -- no family chosen and "only rare" ticked: the rare beasts of every family
+    if state.rareOnly then return BuildPetSearch("") end
     return BuildGuide()
 end
 
@@ -978,14 +1110,35 @@ local function UpdateDetail()
     if not detail then return end
     local id = state.beast
     local b = id and ns.BEASTS[id]
-    detail.content:SetShown(b ~= nil)
-    detail.empty:SetShown(b == nil)
-    if not b then return end
-    local main, second = ns.Names(b)
+    local e = b or (id and ns.PETS and ns.PETS[id]) or nil
+    detail.content:SetShown(e ~= nil)
+    detail.empty:SetShown(e == nil)
+    if not e then return end
+    local main, second = ns.Names(e)
     detail.name:SetText(main)
     detail.name2:SetText(second ~= main and second or "")
-    local fam = ns.FAMILIES[b.f]
-    detail.info:SetText((fam and (ns.DisplayName(fam, true)) or b.f) .. ",  " .. L.LEVEL:format(LevelText(b)))
+    local fam = ns.FAMILIES[e.f]
+    local tag = TagText(id)
+    detail.info:SetText((fam and (ns.DisplayName(fam, true)) or e.f) .. ",  " .. L.LEVEL:format(LevelText(e))
+        .. (tag and (",  " .. GOLD .. tag .. "|r") or ""))
+    if not b then
+        -- a pet of the wider list: no coordinates, no ranks to learn from it
+        local place, more = PlaceOf(id)
+        detail.zone:SetText(place .. (more and ("  " .. GREY .. "(" .. more .. ")|r") or ""))
+        detail.speed:SetText(e.s and L.ATTACK_SPEED:format(SpeedText(e.s)) or "")
+        detail.stable.stableId = nil
+        detail.stable:Hide()
+        detail.teachTitle:ClearAllPoints()
+        detail.teachTitle:SetPoint("TOPLEFT", detail.speed, "BOTTOMLEFT", 0, -12)
+        local tame, why = ns.TameState(id, ns.Ctx().playerLevel)
+        local state1 = tame and ("|cff4dff4d" .. L.PET_CAN_TAME .. "|r")
+            or (RED .. (WhyNotText({ id = id, why = why }, e) or L.PET_NEVER) .. "|r")
+        detail.teaches:SetText(GREY .. L.PET_NO_RANKS .. "|r\n" .. state1)
+        detail.mapBtn:SetEnabled(false)
+        detail.wpBtn:SetEnabled(false)
+        if detail.model.npcId ~= id then SetModelBeast(detail.model, id) end
+        return
+    end
     local zone = ns.ZoneName(b.z)
     if #b.c == 0 then zone = zone .. "  " .. GREY .. "(" .. L.NO_COORDS .. ")|r" end
     detail.zone:SetText(zone)
@@ -1058,8 +1211,12 @@ local function CreateDetail(parent)
     d.name2:SetPoint("TOPLEFT", d.name, "BOTTOMLEFT", 0, -2)
     d.info = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     d.info:SetPoint("TOPLEFT", d.name2, "BOTTOMLEFT", 0, -8)
+    d.info:SetWidth(DETAIL_W - 24)
+    d.info:SetJustifyH("LEFT")
     d.zone = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     d.zone:SetPoint("TOPLEFT", d.info, "BOTTOMLEFT", 0, -3)
+    d.zone:SetWidth(DETAIL_W - 24)
+    d.zone:SetJustifyH("LEFT")
     d.speed = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     d.speed:SetPoint("TOPLEFT", d.zone, "BOTTOMLEFT", 0, -3)
     -- the stable master nearest to the beast's habitat: a click sets a waypoint
@@ -1189,6 +1346,7 @@ local function Refresh(keepScroll)
     detail:SetShown(tab ~= "settings")
     -- the rank filters mean nothing for families and settings
     for _, control in ipairs(frame.filters) do control:SetShown(tab == "nearby" or tab == "abilities") end
+    frame.rareOnly:SetShown(tab == "families")
     frame.empty:Hide()
     if tab == "nearby" then
         local data = BuildNearby()
@@ -1377,6 +1535,14 @@ local function CreateWindow()
     frame.look = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     frame.look:SetPoint("LEFT", plus, "RIGHT", 8, 0)
     frame.filters = { petOnly, learned, minus, plus, frame.look }
+    -- Families tab: only the beasts Petopia marks as rare, elite or otherwise special
+    frame.rareOnly = MakeCheck(frame, L.FILTER_RARE, 62, -61,
+        function() return state.rareOnly end,
+        function(v)
+            state.rareOnly = v
+            ns.RefreshWindow()
+        end)
+    frame.rareOnly:Hide()
 
     local search = CreateFrame("EditBox", "BeastAtlasSearch", frame, "SearchBoxTemplate")
     search:SetSize(210, 20)
@@ -1446,9 +1612,17 @@ local function CreateWindow()
             state.family = d.key
         elseif d.kind == "guide" then
             state.family = nil
+            state.rareOnly = false
         else
             return
         end
+        if state.search ~= "" then
+            state.search = ""
+            BeastAtlasSearch:SetText("")
+            Refresh() -- the list on the left was narrowed by the search too
+            return
+        end
+        SyncControls()
         familyList:Refresh()
         familyPane:SetData(BuildFamilyPane())
     end)
@@ -1496,7 +1670,7 @@ local function CreateWindow()
     frame:SetScript("OnShow", function(self)
         Refresh()
         self.ticker = C_Timer.NewTicker(5, function()
-            local guide = state.tab == "families" and state.family == nil
+            local guide = state.tab == "families" and state.family == nil and state.search == "" and not state.rareOnly
             if not (state.tab == "nearby" or guide) or search:HasFocus() then return end
             local cont, px, py = ns.PlayerWorldPos()
             if not cont then return end

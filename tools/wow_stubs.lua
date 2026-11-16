@@ -86,12 +86,14 @@ Mock = { __index = function(t, k)
     if k == "GetPoint" then return function() return "CENTER", nil, "CENTER", 0, 0 end end
     if k == "GetCenter" then return function() return 100, 100 end end
     if k == "GetName" then return function(self) return self.__name end end
+    if k == "GetParent" then return function(self) return self.__parent end end
     if k == "IsMouseClickEnabled" or k == "IsMouseMotionEnabled" then return function(self) return self.__mouse end end
     return noop
 end }
 
 function CreateFrame(kind, name, parent, template)
     local f = newMock(kind, name)
+    f.__parent = parent
     if name then _G[name] = f end
     if template == "ButtonFrameTemplate" then
         f.Inset = newMock("Frame")

@@ -94,6 +94,18 @@ if __FACTION == "Alliance" then
         end
     end
     check(spots >= 25, "Alliance: stable spots checked: " .. spots)
+    -- pets only Horde hunters can tame are not for this hunter, whatever the level
+    local hordeOnly = 0
+    for id, p in pairs(ns.PETS) do
+        local ok, why = ns.TameState(id, 60)
+        if p.side == "H" and p.tame ~= false then
+            hordeOnly = hordeOnly + 1
+            check(ok == false and why == "side", "Alliance: a Horde-only pet counts as tameable: " .. p.en)
+        elseif p.tame ~= false and p.l[1] > 0 then
+            check(ok == true, "Alliance: an ordinary pet is not tameable at 60: " .. p.en)
+        end
+    end
+    check(hordeOnly >= 1, "test setup: no Horde-only pet in the data")
     return table.concat(fails, "\n"), ("alliance ok: pinned=%d stableSpots=%d"):format(seenA, spots)
 end
 
@@ -1304,6 +1316,31 @@ do
     local level = 30
     __U.player.level = level
     __playerMap, __playerPos = 1429, { x = 0.5, y = 0.5 }
+    -- The test's own reading of the data: a creature is a teacher (ns.BEASTS) or only in the wider list
+    -- (ns.PETS). A Horde hunter can tame it some day unless Petopia says "cannot be tamed", it is for
+    -- Alliance hunters only, or its level is unknown; and now, when it is not above the hunter.
+    local function entry(id) return ns.BEASTS[id] or ns.PETS[id] end
+    local function everTame(id)
+        local p = ns.PETS[id]
+        return not (p and (p.tame == false or p.side == "A")) and entry(id).l[1] > 0
+    end
+    local function tameNow(id, lvl) return everTame(id) and entry(id).l[1] <= lvl end
+    local allPets, teachersOnly, extraOnly = {}, 0, 0
+    for id in pairs(ns.BEASTS) do
+        if everTame(id) then allPets[#allPets + 1] = id; teachersOnly = teachersOnly + 1 end
+    end
+    for id in pairs(ns.PETS) do
+        if not ns.BEASTS[id] and everTame(id) then allPets[#allPets + 1] = id; extraOnly = extraOnly + 1 end
+    end
+    check(teachersOnly >= 370 and extraOnly >= 200, ("test setup: %d teachers, %d other pets"):format(teachersOnly, extraOnly))
+    for id in pairs(ns.PETS) do
+        local ok, why = ns.TameState(id, level)
+        check(ok == tameNow(id, level), "TameState differs from the data for " .. id)
+        local p = ns.PETS[id]
+        local want = p.tame == false and "never" or p.side == "A" and "side" or entry(id).l[1] <= 0 and "unknown"
+            or entry(id).l[1] > level and "level" or nil
+        check(why == want, ("TameState reason for %d: %s, expected %s"):format(id, tostring(why), tostring(want)))
+    end
     ns.SetOption("petOnly", true) -- must not hide anything here: this tab is not about the main pet's ranks
     ns.Changed()
     tab("tabFamilies")
@@ -1384,7 +1421,10 @@ do
 
     -- the fastest beasts follow the speed paragraph, fastest first
     local minSpeed = 99
-    for _, b in pairs(ns.BEASTS) do if b.s and b.s < minSpeed then minSpeed = b.s end end
+    for _, id in ipairs(allPets) do
+        local b = entry(id)
+        if b.s and b.s < minSpeed then minSpeed = b.s end
+    end
     local fastest, fastNow, nearby, section, nowList = {}, {}, {}, nil, false
     local nowText = L.GUIDE_FASTEST_NOW:format(level)
     for _, d in ipairs(guide) do
@@ -1396,11 +1436,12 @@ do
     end
     -- the fastest of those a level 30 hunter can tame: quicker than 2.0, fastest first, then the higher level
     local want = {}
-    for id, b in pairs(ns.BEASTS) do
-        if b.s and b.s < 2 and b.l[1] <= level then want[#want + 1] = id end
+    for _, id in ipairs(allPets) do
+        local b = entry(id)
+        if b.s and b.s < 2 and tameNow(id, level) then want[#want + 1] = id end
     end
     table.sort(want, function(a, b)
-        local ba, bb = ns.BEASTS[a], ns.BEASTS[b]
+        local ba, bb = entry(a), entry(b)
         if ba.s ~= bb.s then return ba.s < bb.s end
         if ba.l[2] ~= bb.l[2] then return ba.l[2] > bb.l[2] end
         return a < b
@@ -1408,12 +1449,13 @@ do
     check(nowList and #fastNow == math.min(5, #want) and #want >= 5, "fastest tameable beasts: list missing or wrong length: " .. #fastNow)
     for i, d in ipairs(fastNow) do
         check(d.id == want[i], "fastest tameable beasts: wrong beast at " .. i)
-        check(d.tame and ns.BEASTS[d.id].l[1] <= level, "a beast that cannot be tamed yet among the tameable ones")
+        check(d.tame and tameNow(d.id, level), "a beast that cannot be tamed yet among the tameable ones")
     end
-    check(#fastest == 5 and ns.BEASTS[fastest[1].id].s == minSpeed, "fastest beasts: wrong count or not the fastest first")
+    check(#fastest == 5 and entry(fastest[1].id).s == minSpeed, "fastest beasts: wrong count or not the fastest first")
     for i = 2, #fastest do
-        check(ns.BEASTS[fastest[i - 1].id].s <= ns.BEASTS[fastest[i].id].s, "fastest beasts not sorted by speed")
+        check(entry(fastest[i - 1].id).s <= entry(fastest[i].id).s, "fastest beasts not sorted by speed")
     end
+    for _, d in ipairs(fastest) do check(everTame(d.id), "a beast nobody can tame among the fastest: " .. entry(d.id).en) end
     -- "worth taming now": level window, known distance, at most two families per role, the nearest of each role
     local cont, px, py = ns.PlayerWorldPos()
     check(cont, "test setup: no player position")
@@ -1439,7 +1481,7 @@ do
     for r, dist in pairs(best) do check(perRole[r], "role " .. r .. " has candidates but no pick") end
     local petRow = rowOf(nearby[1] or fastest[1])
     check(petRow and petRow.sub.__text:find(L.PET_SPEED:format(""), 1, true), "pet row shows no attack speed")
-    check(petRow and petRow.sub.__text:find(L["ROLE_" .. ns.FAMILIES[ns.BEASTS[petRow.data.id].f].role], 1, true),
+    check(petRow and petRow.sub.__text:find(L["ROLE_" .. ns.FAMILIES[entry(petRow.data.id).f].role], 1, true),
         "pet row in the guide shows no role")
 
     -- below level 10 nothing can be tamed
@@ -1452,7 +1494,7 @@ do
     for _, d in ipairs(low) do
         if d.kind == "group" then section = d.text end
         check(not (d.kind == "pet" and section == L.GUIDE_H_NEARBY), "taming suggested below level 10")
-        check(not (d.kind == "pet" and d.tame and ns.BEASTS[d.id].l[1] > 9), "beast above level 9 marked tameable")
+        check(not (d.kind == "pet" and d.tame and entry(d.id).l[1] > 9), "beast above level 9 marked tameable")
         check(not (d.kind == "text" and d.text == L.GUIDE_FASTEST_NOW:format(9)), "tameable list offered below level 10")
     end
     -- at 60 every beast can be tamed: the second list would repeat the first one
@@ -1467,11 +1509,11 @@ do
     ns.RefreshWindow()
 
     -- every family card
-    local cards = 0
-    for _, entry in ipairs(families().data) do
-        if entry.kind == "family" then
-            local key, fam = entry.key, ns.FAMILIES[entry.key]
-            click(entry)
+    local cards, plainRows = 0, 0
+    for _, entry0 in ipairs(families().data) do
+        if entry0.kind == "family" then
+            local key, fam = entry0.key, ns.FAMILIES[entry0.key]
+            click(entry0)
             local card = pane().data
             cards = cards + 1
             check(card[1].kind == "group" and card[1].text:find(loc(fam), 1, true), "card title: " .. key)
@@ -1507,10 +1549,13 @@ do
                     check(not (d.right and d.ab.key == "cower"), "Cower is open to every family: " .. key)
                     if d.right then flagged = flagged + 1 end
                 elseif d.kind == "pet" then
-                    local b = ns.BEASTS[d.id]
+                    local b = entry(d.id)
                     pets = pets + 1
                     check(b.f == key, "beast of another family in the card: " .. b.en)
-                    check(d.tame == (b.l[1] <= level), "tameable flag wrong: " .. b.en)
+                    check(everTame(d.id), "a beast nobody can tame in the card: " .. b.en)
+                    check(d.tame == tameNow(d.id, level), "tameable flag wrong: " .. b.en)
+                    check((d.dist ~= nil) == (ns.BEASTS[d.id] ~= nil and ns.BeastDistance(d.id, ns.PlayerWorldPos()) ~= nil),
+                        "only a teacher with a known habitat has a distance: " .. b.en)
                     if not d.tame then tameEnded = true end
                     check(not (d.tame and tameEnded), "tameable beasts must come first: " .. key)
                 end
@@ -1521,12 +1566,45 @@ do
             check(firstOwn == hasOwn, "the family's own ability is not first: " .. key)
             -- as of this data: every family but the Bat has exactly one ability of its own
             check(flagged == (key == "Bat" and 0 or 1), ("own abilities flagged: %d: %s"):format(flagged, key))
-            local inAtlas = 0
-            for _, b in pairs(ns.BEASTS) do if b.f == key then inAtlas = inAtlas + 1 end end
+            local inAtlas, teachers = 0, 0
+            for _, id in ipairs(allPets) do
+                if entry(id).f == key then
+                    inAtlas = inAtlas + 1
+                    if ns.BEASTS[id] then teachers = teachers + 1 end
+                end
+            end
             check(pets == inAtlas and pets > 0, ("card beasts: %d of %d: %s"):format(pets, inAtlas, key))
+            check(card[#card - pets].text:find(tostring(inAtlas), 1, true) or card[#card - pets - 1].text:find(tostring(inAtlas), 1, true),
+                "the card does not say how many beasts the family has: " .. key)
+            -- the family row on the left counts the same beasts
+            check(rowOf(entry0) == nil or rowOf(entry0).sub.__text:find(L.FAM_ROW_SUB:format(inAtlas, 0, 0):match("^[^,]+"), 1, true),
+                "the family list counts other beasts than the card: " .. key)
             -- the rows are drawn from raw data: with "only my pet's family" on they still say what the beast knows
+            -- a pet that teaches nothing: no "knows" part, the place from Petopia's text, a plain tooltip
             for _, d in ipairs(card) do
-                local row = d.kind == "pet" and rowOf(d)
+                local row = d.kind == "pet" and not ns.BEASTS[d.id] and rowOf(d)
+                if row then
+                    local p = ns.PETS[d.id]
+                    plainRows = plainRows + 1
+                    check(row.text.__text:find(loc(p), 1, true), "plain pet row has no name: " .. p.en)
+                    check(not row.sub.__text:find(L.PET_KNOWS:format(""), 1, true), "a pet that teaches nothing says what it knows: " .. p.en)
+                    check(row.right.__text == "", "a pet without coordinates shows a distance: " .. p.en)
+                    GameTooltip.__lines = {}
+                    row.__scripts.OnEnter(row)
+                    local tipText = table.concat(GameTooltip.__lines, "\n")
+                    check(tipText:find(loc(p), 1, true) and tipText:find(L.PET_NO_RANKS, 1, true), "plain pet tooltip is wrong: " .. p.en)
+                    if p.z:find(",", 1, true) then
+                        check(tipText:find(p.z, 1, true), "the tooltip lacks Petopia's place text: " .. p.z)
+                    end
+                    if p.tag then
+                        check(row.text.__text:find(L["TAG_" .. p.tag], 1, true), "no rare/elite mark on the row: " .. p.en)
+                    end
+                    row.__scripts.OnLeave(row)
+                    break
+                end
+            end
+            for _, d in ipairs(card) do
+                local row = d.kind == "pet" and ns.BEASTS[d.id] and rowOf(d)
                 if row then
                     local b = ns.BEASTS[d.id]
                     check(row.text.__text:find(loc(b), 1, true), "pet row has no name: " .. b.en)
@@ -1554,10 +1632,80 @@ do
                     break
                 end
             end
-            check(rowOf(entry) and rowOf(entry).sel:IsShown(), "selected family not highlighted: " .. key)
+            check(rowOf(entry0) and rowOf(entry0).sel:IsShown(), "selected family not highlighted: " .. key)
         end
     end
     check(cards == 18, "family cards opened: " .. cards)
+    check(plainRows >= 5, "rows of pets that teach nothing were drawn for " .. plainRows .. " families")
+
+    -- only the rare, elite and special ones
+    check(win.rareOnly:IsShown(), "the rare filter is not shown on the Families tab")
+    win.rareOnly.__checked = true
+    win.rareOnly.__scripts.OnClick(win.rareOnly)
+    for _, entry0 in ipairs(families().data) do
+        if entry0.kind == "family" then
+            click(entry0)
+            local wantRare, gotRare = 0, 0
+            for _, id in ipairs(allPets) do
+                if entry(id).f == entry0.key and ns.PETS[id] and ns.PETS[id].tag then wantRare = wantRare + 1 end
+            end
+            for _, d in ipairs(pane().data) do
+                if d.kind == "pet" then
+                    gotRare = gotRare + 1
+                    check(ns.PETS[d.id] and ns.PETS[d.id].tag, "an ordinary beast passed the rare filter: " .. entry(d.id).en)
+                end
+            end
+            check(gotRare == wantRare, ("rare filter: %d of %d in %s"):format(gotRare, wantRare, entry0.key))
+            if wantRare == 0 then
+                check(allText(pane().data):find(L.FAM_NONE_RARE, 1, true), "no note for a family without rare beasts: " .. entry0.key)
+            end
+        end
+    end
+    -- no family chosen (the guide): the rare beasts of every family at once
+    click(families().data[1])
+    check(win.rareOnly.__checked == false, "opening the guide should untick the rare filter")
+    check(pane().data[1].text == L.GUIDE_TITLE, "the guide row does not open the guide while the rare filter is on")
+    win.rareOnly.__checked = true
+    win.rareOnly.__scripts.OnClick(win.rareOnly)
+    local allRare, listed = 0, 0
+    for _, id in ipairs(allPets) do
+        if ns.PETS[id] and ns.PETS[id].tag then allRare = allRare + 1 end
+    end
+    local rareList = list(function(data) return data[1] and data[1].kind == "group" and data[1].text == L.FAM_BEASTS_RARE:format(allRare) end)
+    check(rareList, "ticking the rare filter on the guide does not list the rare beasts of all families")
+    for _, d in ipairs(rareList and rareList.data or {}) do
+        if d.kind == "pet" then
+            listed = listed + 1
+            check(ns.PETS[d.id] and ns.PETS[d.id].tag, "an ordinary beast in the list of rare ones: " .. entry(d.id).en)
+        end
+    end
+    check(listed == allRare and allRare >= 100, ("rare beasts of all families: %d listed of %d"):format(listed, allRare))
+    win.rareOnly.__checked = false
+    win.rareOnly.__scripts.OnClick(win.rareOnly)
+    check(pane() and pane().data[1].text == L.GUIDE_TITLE, "unticking the rare filter does not bring the guide back")
+
+    -- a pet that teaches nothing in the detail pane: name, no ranks, no stable line
+    local plain
+    for _, entry0 in ipairs(families().data) do
+        if entry0.kind == "family" and not plain then
+            click(entry0)
+            for _, d in ipairs(pane().data) do
+                if d.kind == "pet" and not ns.BEASTS[d.id] and rowOf(d) and not plain then plain = d end
+            end
+        end
+    end
+    check(plain, "test setup: no drawn row of a pet that teaches nothing")
+    if plain then
+        click(plain)
+        local detailFrame
+        for _, f in ipairs(__frames) do
+            if rawget(f, "teaches") and rawget(f, "stable") then detailFrame = f end
+        end
+        check(detailFrame and detailFrame.name:GetText() == loc(ns.PETS[plain.id]), "detail pane does not show the chosen pet")
+        check(detailFrame and detailFrame.teaches:GetText():find(L.PET_NO_RANKS, 1, true), "detail pane: no 'teaches nothing' note")
+        check(detailFrame and not detailFrame.stable:IsShown(), "detail pane: stable line for a pet without coordinates")
+        check(rowOf(plain).sel:IsShown(), "the chosen pet is not highlighted")
+    end
 
     -- a beast in the card: selecting it shows it in the detail pane
     local firstPet, firstAbility
@@ -1597,6 +1745,44 @@ do
         end
     end
     check(n == 1, "search for a family found " .. n)
+    -- the pane lists what was found in the whole pet list: at least every cat, and nothing unrelated
+    local q = ns.Lower(loc(ns.FAMILIES.Cat))
+    local found, cats = {}, 0
+    local results = list(function(data) return data[1] and data[1].kind == "group" and data[1].text:find(L.PET_FOUND:format(0):match("^[^0-9]+"), 1, true) end)
+    check(results, "no search results pane on the Families tab")
+    for _, d in ipairs(results and results.data or {}) do
+        if d.kind == "pet" then
+            found[d.id] = true
+            local e, fam = entry(d.id), ns.FAMILIES[entry(d.id).f]
+            local hay = ns.Lower(table.concat({ e.en, e.ru or "", fam.en, fam.ru, ns.PETS[d.id] and ns.PETS[d.id].z or "",
+                ns.BEASTS[d.id] and ns.ZoneName(ns.BEASTS[d.id].z) or "" }, "|"))
+            check(hay:find(q, 1, true), "search result that matches nothing: " .. e.en)
+        end
+    end
+    local shownCats = 0
+    for _, id in ipairs(allPets) do
+        if entry(id).f == "Cat" then
+            cats = cats + 1
+            if found[id] then shownCats = shownCats + 1 end
+        end
+    end
+    check(cats >= 60 and (shownCats == cats or shownCats == 100), ("search for cats: %d of %d shown"):format(shownCats, cats))
+    -- with a search on, clicking a family opens its card and drops the search (it is not a dead end)
+    local catRow
+    for _, d in ipairs(families().data) do if d.kind == "family" and d.key == "Cat" then catRow = d end end
+    click(catRow)
+    check(BeastAtlasSearch:GetText() == "", "clicking a family did not clear the search box")
+    local fams = 0
+    for _, d in ipairs(families().data) do if d.kind == "family" then fams = fams + 1 end end
+    check(fams == 18, "the family list stays narrowed after a family was clicked: " .. fams)
+    check(pane() and pane().data[1].text:find(loc(ns.FAMILIES.Cat), 1, true) and pane().data[2].kind == "text",
+        "clicking a family during a search did not open its card")
+    __advance(0.5)
+    BeastAtlasSearch.__text = "zzzz-no-such-beast"
+    __run(BeastAtlasSearch, "OnTextChanged")
+    __advance(0.5)
+    check(allText(pane and (list(function(data) return data[2] and data[2].kind == "text" end) or {}).data or {}):find(L.PET_NOT_FOUND, 1, true),
+        "no 'nothing found' note")
     BeastAtlasSearch.__text = ""
     __run(BeastAtlasSearch, "OnTextChanged")
     __advance(0.5)
@@ -1604,6 +1790,274 @@ do
     check(pane().data[1].text == L.GUIDE_TITLE, "the guide entry does not open the guide")
     __advance(6) -- the ticker redraws the guide's picks without errors
     ns.SetOption("petOnly", false)
+    tab("tabNearby")
+    if not wasShown then slash("") end
+end
+
+-------------------------------------------------------------------------------
+-- 15. beasts that teach several needed ranks at once; "on the map" for one rank
+-------------------------------------------------------------------------------
+do
+    local wasShown = BeastAtlasFrame:IsShown()
+    if not wasShown then slash("") end
+    local win = BeastAtlasFrame
+    local AREA, ICON, ZONE = "BeastAtlasAreaPinTemplate", "BeastAtlasIconPinTemplate", "BeastAtlasZonePinTemplate"
+    local function tab(name) win[name].__scripts.OnClick(win[name]) end
+    local function rowOf(d)
+        for _, f in ipairs(__frames) do
+            for _, row in ipairs(rawget(f, "__active") or {}) do
+                if row.data == d then return row end
+            end
+        end
+    end
+    local function shownList(pred)
+        for _, f in ipairs(__frames) do
+            if rawget(f, "SetData") and f:IsShown() and pred(f.data) then return f end
+        end
+    end
+    local function readyOf(list)
+        local n = 0
+        for _, e in ipairs(list or {}) do if e.status == S.READY then n = n + 1 end end
+        return n
+    end
+
+    -- ---- several ranks at once: find a hunter level at which some zone has such a beast
+    ns.SetOption("petOnly", false)
+    ns.SetOption("showLearned", false)
+    wipe(ns.cdb.known)
+    local multiZone, multiId
+    for _, lvl in ipairs({ 30, 24, 36, 42, 48, 54, 60, 18, 12 }) do
+        __U.player.level = lvl
+        ns.Changed()
+        for mapID, ids in pairs(ns.BeastsByMap()) do
+            for _, id in ipairs(ids) do
+                local _, list = ns.BeastUseful(id)
+                if readyOf(list) >= 2 then multiZone, multiId = mapID, id end
+            end
+        end
+        if multiId then break end
+    end
+    check(multiId, "test setup: no beast teaches two ranks worth learning at once")
+    if multiId then
+        __playerMap, __playerPos = multiZone, { x = 0.5, y = 0.5 }
+        ns.Changed()
+        tab("tabNearby")
+        ns.RefreshWindow()
+        local nearby = shownList(function(data) return data[1] and data[1].kind == "group" and data[2] and data[2].id end)
+        check(nearby, "nearby list not shown")
+        local seenMulti, inHere, lastReady = 0, false, nil
+        for _, d in ipairs(nearby and nearby.data or {}) do
+            if d.kind == "group" then
+                inHere = d.text == L.GROUP_HERE:format(ns.ZoneName(ns.BEASTS[multiId].z))
+                lastReady = nil
+            elseif d.id then
+                local n = readyOf(d.list)
+                check(d.ready == n, "ready count of a nearby beast is wrong: " .. ns.BEASTS[d.id].en)
+                local row = rowOf(d)
+                if row then
+                    local marked = row.sub.__text:find(L.MULTI:format(n), 1, true) == 11 -- right after the colour code
+                    check((n >= 2) == (marked or false), ("'%d at once' mark wrong for %s: %s"):format(n, ns.BEASTS[d.id].en, row.sub.__text))
+                    if n >= 2 then
+                        seenMulti = seenMulti + 1
+                        GameTooltip.__lines = {}
+                        row.__scripts.OnEnter(row)
+                        check(table.concat(GameTooltip.__lines, "\n"):find(L.MULTI_TIP:format(n), 1, true), "no tooltip line about several ranks at once")
+                        row.__scripts.OnLeave(row)
+                    end
+                end
+                -- in the hunter's zone, among the beasts to tame now, more ranks at once come first
+                if inHere and d.status == S.READY then
+                    check(not lastReady or lastReady >= n, "beasts with more needed ranks should come first in the zone")
+                    lastReady = n
+                end
+            end
+        end
+        check(seenMulti >= 1, "no row is marked as teaching several ranks at once")
+    end
+    __U.player.level = 30
+    ns.Changed()
+
+    -- ---- the teachers of one rank on the map
+    local function mappable(key, rank)
+        local set, n, zones = {}, 0, {}
+        for _, id in ipairs(ability(key).ranks[rank].beasts or {}) do
+            local b = ns.BEASTS[id]
+            if #b.c > 0 and ns.ZoneMap(b.z) then
+                set[id] = true
+                n = n + 1
+                zones[ns.ZoneMap(b.z)] = (zones[ns.ZoneMap(b.z)] or 0) + 1
+            end
+        end
+        return set, n, zones
+    end
+    -- a rank whose teachers live in at least two zones, and a rank nobody on a map teaches
+    local fKey, fRank, noneKey, noneRank
+    for _, ab in ipairs(ns.ABILITIES) do
+        for rank in pairs(ab.ranks) do
+            local _, n, zones = mappable(ab.key, rank)
+            local nz = 0
+            for _ in pairs(zones) do nz = nz + 1 end
+            local forWolf = false
+            for _, f in ipairs(ab.families) do forWolf = forWolf or f == "*" or f == "Wolf" end
+            if nz >= 2 and n >= 3 and rank > 1 and not forWolf and not fKey then fKey, fRank = ab.key, rank end
+            if n == 0 and not noneKey then noneKey, noneRank = ab.key, rank end
+            check(#ns.RankTeachersOnMap(ab.key, rank) == n, "RankTeachersOnMap differs from the data for " .. ab.key .. " " .. rank)
+        end
+    end
+    check(fKey and noneKey, "test setup: need a rank with teachers in two zones and one with none on a map")
+    local set, total, zones = mappable(fKey, fRank)
+    local label = loc(ability(fKey)) .. " " .. fRank
+
+    -- nothing to show: no focus, a message
+    local from = #__out + 1
+    check(ns.FocusRank(noneKey, noneRank) == false and ns.focus == nil, "focus set for a rank with no teacher on a map")
+    check(outHas(L.FOCUS_NONE, from), "no message for a rank that cannot be shown")
+
+    -- the zone of the nearest teacher opens
+    ns.SetOption("petOnly", true) -- the rank is not for the main pet's family: the usual filters would hide it
+    local someZoneMap = next(zones)
+    __playerMap, __playerPos = someZoneMap, { x = 0.5, y = 0.5 }
+    do
+        local cont, px, py = ns.PlayerWorldPos()
+        local best
+        for id in pairs(set) do
+            local d = ns.BeastDistance(id, cont, px, py)
+            if d and (not best or d < best) then best, someZoneMap = d, ns.ZoneMap(ns.BEASTS[id].z) end
+        end
+    end
+    WorldMapFrame:Show()
+    ns.SetOption("mapPins", false) -- the focus is shown even with the beasts on the map switched off
+    __advance(0.5)
+    from = #__out + 1
+    check(ns.FocusRank(fKey, fRank) == true, "FocusRank failed")
+    __advance(0.5)
+    check(ns.focus and ns.focus.label == label, "focus label wrong")
+    for id in pairs(set) do check(ns.focus.ids[id], "focus misses a teacher " .. id) end
+    for id in pairs(ns.focus and ns.focus.ids or {}) do check(set[id], "focus has a beast that does not teach the rank " .. id) end
+    check(__map.id == someZoneMap, "focus did not open the zone of the nearest teacher")
+    check(outHas(label, from) and outHas(ns.ZoneName(ns.ZoneByMap(someZoneMap)), from), "focus message lacks the rank or the zones")
+    check(BeastAtlasMapFocus:IsShown() and BeastAtlasMapFocus.text:GetText():find(label, 1, true), "no bar on the map while the focus is on")
+    -- every zone of the focus: exactly its teachers, with their habitats drawn
+    for mapID, count in pairs(zones) do
+        WorldMapFrame:SetMapID(mapID)
+        local seen, n = {}, 0
+        for _, pin in ipairs(__map.pins[ICON] or {}) do
+            for _, id in ipairs(pin.stack.ids) do
+                check(set[id], "a beast that does not teach the rank is on the map: " .. ns.BEASTS[id].en)
+                if not seen[id] then seen[id] = true; n = n + 1 end
+            end
+        end
+        check(n == count, ("zone %d shows %d teachers of the rank, expected %d"):format(mapID, n, count))
+        local fills = 0
+        for _, pin in ipairs(__map.pins[AREA] or {}) do if pin.Fill:IsShown() then fills = fills + 1 end end
+        check(fills == __pinCount(AREA) and fills > 0, "habitats of the focused teachers are not drawn")
+        local pin = __map.pins[ICON][1]
+        GameTooltip.__lines = {}
+        pin:OnMouseEnter()
+        check(table.concat(GameTooltip.__lines, "\n"):find(label, 1, true), "pin tooltip does not name the focused rank")
+        pin:OnMouseLeave()
+    end
+    -- a zone with beasts but no teacher of the rank shows none of them
+    for mapID in pairs(ns.BeastsByMap()) do
+        if not zones[mapID] then
+            WorldMapFrame:SetMapID(mapID)
+            check(__pinCount(ICON) == 0 and __pinCount(AREA) == 0, "beasts shown in a zone without teachers of the focused rank")
+            break
+        end
+    end
+    -- continents: one pin per zone with teachers, carrying their number
+    local zonePins = 0
+    for _, cont in ipairs({ 1414, 1415 }) do
+        WorldMapFrame:SetMapID(cont)
+        for _, pin in ipairs(__map.pins[ZONE] or {}) do
+            local sm = pin.summary
+            zonePins = zonePins + 1
+            check(sm.focus == label and sm.count == zones[sm.mapID], "zone pin of a focus has a wrong count")
+            GameTooltip.__lines = {}
+            pin:OnMouseEnter()
+            check(table.concat(GameTooltip.__lines, "\n"):find(L.FOCUS_ZONE:format(label, sm.count), 1, true), "zone pin tooltip of a focus is wrong")
+            pin:OnMouseLeave()
+        end
+    end
+    local nz = 0
+    for _ in pairs(zones) do nz = nz + 1 end
+    check(zonePins == nz, ("zone pins of a focus: %d, zones with teachers: %d"):format(zonePins, nz))
+    -- closing the map keeps the focus; the bar clears it and everything is back
+    WorldMapFrame:Hide()
+    WorldMapFrame:Show()
+    check(ns.focus ~= nil, "the focus was lost when the map was closed")
+    BeastAtlasMapFocus.__scripts.OnClick(BeastAtlasMapFocus)
+    __advance(0.5)
+    check(ns.focus == nil and not BeastAtlasMapFocus:IsShown(), "clicking the bar did not clear the focus")
+    WorldMapFrame:SetMapID(someZoneMap)
+    check(__pinCount(ICON) == 0, "beasts drawn with the map option off and no focus")
+    ns.SetOption("mapPins", true)
+    __advance(0.5)
+
+    -- standing elsewhere on the continent: the zone of the nearest teacher opens
+    local elsewhere
+    for mapID in pairs(ns.BeastsByMap()) do
+        if not zones[mapID] and (mapID % 2) == (someZoneMap % 2) then elsewhere = mapID break end
+    end
+    if elsewhere then
+        __playerMap, __playerPos = elsewhere, { x = 0.5, y = 0.5 }
+        local cont, px, py = ns.PlayerWorldPos()
+        local best, bestMap
+        for id in pairs(set) do
+            local d = ns.BeastDistance(id, cont, px, py)
+            if d and (not best or d < best) then best, bestMap = d, ns.ZoneMap(ns.BEASTS[id].z) end
+        end
+        ns.FocusRank(fKey, fRank)
+        __advance(0.5)
+        if bestMap then check(__map.id == bestMap, "focus did not open the zone of the nearest teacher") end
+    end
+    -- asking for one beast drops the focus: the filter would hide it
+    local other
+    for id, b in pairs(ns.BEASTS) do
+        if not set[id] and #b.c > 0 and ns.ZoneMap(b.z) then other = id break end
+    end
+    ns.OpenMapFor(other)
+    __advance(0.5)
+    check(ns.focus == nil and ns.highlight == other, "opening one beast on the map should drop the rank focus")
+    WorldMapFrame:Hide()
+
+    -- the button on the rank headers of the Abilities tab: only where there is something to show
+    ns.SetOption("petOnly", false)
+    tab("tabAbilities")
+    local buttons, hidden, clicked = 0, 0, false
+    for _, key in ipairs({ fKey, noneKey }) do
+        local abRow
+        for _, f in ipairs(__frames) do
+            for _, row in ipairs(rawget(f, "__active") or {}) do
+                if row.data and row.data.kind == "ability" and row.data.ab.key == key then abRow = row end
+            end
+        end
+        check(abRow, "ability not in the list: " .. key)
+        if abRow then abRow.__scripts.OnClick(abRow, "LeftButton") end
+        for _, f in ipairs(__frames) do
+            for _, row in ipairs(rawget(f, "__active") or {}) do
+                local d = row.data
+                if d and d.kind == "header" and d.ab.key == key then
+                    local _, n = mappable(d.ab.key, d.rank)
+                    check(row.mapBtn:IsShown() == (n > 0), "map button on a rank header wrong: " .. d.ab.key .. " " .. d.rank)
+                    if n > 0 and d.rank > 1 and not clicked then
+                        clicked = true
+                        row.mapBtn.__scripts.OnClick(row.mapBtn)
+                        __advance(0.5)
+                        check(ns.focus and ns.focus.key == d.ab.key and ns.focus.rank == d.rank, "the map button did not focus its rank")
+                        ns.ClearFocus()
+                    end
+                    if n > 0 then buttons = buttons + 1 else hidden = hidden + 1 end
+                elseif d and d.kind ~= "header" and row.mapBtn then
+                    check(not row.mapBtn:IsShown(), "map button on a row that is not a rank header")
+                end
+            end
+        end
+    end
+    check(buttons >= 1 and hidden >= 1 and clicked, ("rank headers: %d with a map button, %d without"):format(buttons, hidden))
+    WorldMapFrame:Hide()
+    __playerMap, __playerPos = 1429, { x = 0.5, y = 0.5 }
+    ns.SetOption("petOnly", true)
     tab("tabNearby")
     if not wasShown then slash("") end
 end

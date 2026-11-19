@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1
+
+- Fixed the error flood in dungeons and raids (`Tooltip.lua:17: bad argument #1 to 'UnitGUID'`): inside
+  instances the game hides which unit a tooltip belongs to, and the atlas now leaves such tooltips alone.
+
 ## 1.0.0
 
 First stable release. The addon is the same as 0.7.0; from this version on the files are published as releases

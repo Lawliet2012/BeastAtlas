@@ -192,18 +192,28 @@ function GetLocale() return __LOCALE end
 function UnitClass() return __CLASS, __CLASS end
 __FACTION = __FACTION or "Horde" -- the runner may ask for an Alliance player
 function UnitFactionGroup() return __FACTION, __FACTION end
-function UnitExists(u) return __U[u] ~= nil end
+-- Secret values: in instances the client hands addons opaque values (here: marked tables). The Unit*
+-- functions refuse a secret unit token from addon code, exactly as the game does.
+__secrets = setmetatable({}, { __mode = "k" })
+function __secret() local v = {}; __secrets[v] = true; return v end
+local function U(u)
+    if __secrets[u] then
+        error("Secret values are only allowed during untainted execution for this argument.", 3)
+    end
+    return __U[u]
+end
+function UnitExists(u) return U(u) ~= nil end
 function UnitIsDead() return false end
 __onTaxi = false
 function UnitOnTaxi() return __onTaxi end
-function UnitLevel(u) return __U[u] and __U[u].level end
-function UnitName(u) return __U[u] and __U[u].name end
-function UnitGUID(u) return __U[u] and __U[u].guid end
-function UnitCreatureFamily(u) return __U[u] and __U[u].family end
+function UnitLevel(u) u = U(u); return u and u.level end
+function UnitName(u) u = U(u); return u and u.name end
+function UnitGUID(u) u = U(u); return u and u.guid end
+function UnitCreatureFamily(u) u = U(u); return u and u.family end
 function GetCursorPosition() return 0, 0 end
 function IsShiftKeyDown() return __SHIFT end
 function InCombatLockdown() return __combat end
-function issecretvalue() return false end
+function issecretvalue(v) return type(v) == "table" and __secrets[v] == true end
 date = os.date
 
 Enum = {

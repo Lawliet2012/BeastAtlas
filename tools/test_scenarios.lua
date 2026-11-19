@@ -955,6 +955,26 @@ __U.mouseover.family = "Zzfamilie"
 __unitTooltip(GameTooltip)
 check(ns.FamilyKey("Zzfamilie") == ns.BEASTS[withCoords].f, "localized family name not learned")
 check(ns.FamilyKey("ZZFAMILIE") == ns.BEASTS[withCoords].f, "learned family name is case-sensitive")
+-- in a dungeon the tooltip's unit is a secret value: the hook must leave it alone (UnitGUID would raise)
+do
+    local getUnit = GameTooltip.GetUnit
+    GameTooltip.GetUnit = function() return __secret(), __secret() end
+    GameTooltip.__lines = {}
+    local ok, err = pcall(__unitTooltip, GameTooltip)
+    check(ok, "the tooltip hook fails on a secret unit: " .. tostring(err))
+    check(#GameTooltip.__lines == 0, "the tooltip hook added lines for a secret unit")
+    GameTooltip.GetUnit = getUnit
+    -- a readable unit whose GUID and name are secret: no lines, no error
+    local guid = __U.mouseover.guid
+    __U.mouseover.guid = __secret()
+    ok, err = pcall(__unitTooltip, GameTooltip)
+    check(ok, "the tooltip hook fails on a secret GUID: " .. tostring(err))
+    check(#GameTooltip.__lines == 0, "the tooltip hook added lines for a secret GUID")
+    __U.mouseover.guid, __U.mouseover.name = guid, __secret()
+    ok, err = pcall(__unitTooltip, GameTooltip)
+    check(ok, "the tooltip hook fails on a secret unit name: " .. tostring(err))
+    check(#GameTooltip.__lines > 0, "a secret unit name should not hide the tooltip lines")
+end
 __U.mouseover = nil
 
 -------------------------------------------------------------------------------

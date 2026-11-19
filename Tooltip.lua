@@ -13,7 +13,9 @@ end
 local function OnUnitTooltip(tt)
     if not ns.isHunter or tt ~= GameTooltip then return end
     local ok, _, unit = pcall(tt.GetUnit, tt)
-    if not ok or not unit then return end
+    -- in dungeons and raids the unit token itself is a secret value: addon code may not pass it to
+    -- the Unit* functions at all (UnitGUID raises an error), so there is nothing to look up
+    if not ok or ns.IsSecret(unit) or not unit then return end
     local id = NpcIdFromGUID(UnitGUID(unit))
     local b = id and ns.BEASTS[id]
     if not b then return end

@@ -260,7 +260,9 @@ C_Map = {
         return { mapID = id, name = "Map" .. id, mapType = 3, parentMapID = continentOf(id) }
     end,
     GetAreaInfo = function(id) return "Area" .. id end,
-    GetMapChildrenInfo = function() return { { mapID = 2521, name = "Area16593", mapType = 3 } } end,
+    GetMapChildrenInfo = function()
+        return { { mapID = 2521, name = "Area16593", mapType = 3 }, { mapID = 2523, name = "Area16591", mapType = 3 } }
+    end,
     GetBestMapForUnit = function() return __playerMap end,
     GetPlayerMapPosition = function() return __playerPos and { x = __playerPos.x, y = __playerPos.y } end,
     GetWorldPosFromMapPos = function(id, v)

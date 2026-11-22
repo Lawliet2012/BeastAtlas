@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.0
+
+Data update: everything Petopia has added by 2026-11-22.
+
+- **58 new teachers**, 20 of them in the new zone Riverglades; the rest in Dustwallow Marsh, Stranglethorn Vale,
+  Desolace, Mount Hyjal, Moonglade and other zones. The atlas now has 432 teaching beasts, and the pet catalogue
+  728 creatures (647 of them tameable).
+- **New ability: Sonic Blast** for Bats, five ranks; teachers are known for ranks 1-3.
+- **Teachers for 17 ranks that had none**: Charge 4, Demoralizing Screech 2-4, Dismember 3-4, Dust Cloud 3-5,
+  Mine! 3, Pinch 3-5, Savage Rend 3, Swipe 5, Tendon Rip 3 and Web 3.
+- Corrections from Petopia: King Bangalash teaches Prowl 2 (not Dash 2), Drywallow Snapper teaches Bite 5
+  (not Claw 5), Olm the Wise and Broodmother Valraxx cannot be tamed.
+- Russian names for the stable masters of Riverglades and Mount Hyjal.
+
 ## 1.0.1
 
 - Fixed the error flood in dungeons and raids (`Tooltip.lua:17: bad argument #1 to 'UnitGUID'`): inside

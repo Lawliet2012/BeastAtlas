@@ -354,14 +354,31 @@ for _, case in ipairs({ { 1, 10, 0, 6 }, { 24, 30, 0, 6 }, { 24, 30, 2, 0 }, { 4
     end
 end
 info[#info + 1] = "statusesCompared=" .. compared
--- a dungeon-only top rank (Bite 8: Blackrock Spire) must not hide the best outdoor rank
+-- a top rank with an outdoor teacher needs no alternative
 __U.player.level = 60
 ns.cdb.main = { id = "T|Wolf", name = "T", family = "Wolf", level = 60, ranks = {} }
 wipe(ns.cdb.known)
 ns.Changed()
 local bp = ns.Plan("bite")
-check(bp.target == 8 and bp.alt == 7, ("bite plan at 60: target %s alt %s"):format(tostring(bp.target), tostring(bp.alt)))
-check(ns.RankStatus("bite", 7) == S.READY and ns.RankStatus("bite", 6) == S.OBSOLETE, "outdoor alternative rank not READY")
+check(bp.target == 8 and bp.alt == nil, ("bite plan at 60: target %s alt %s"):format(tostring(bp.target), tostring(bp.alt)))
+-- a dungeon-only top rank must not hide the best outdoor rank. No rank of this data is taught in dungeons
+-- only, so the case is made here: the outdoor teachers of Bite 8 lose their coordinates for a moment.
+do
+    local hidden = {}
+    for _, id in ipairs(ns.Ability("bite").ranks[8].beasts) do
+        local b = ns.BEASTS[id]
+        if #b.c > 0 then hidden[id] = b.c; b.c = {} end
+    end
+    check(next(hidden) ~= nil, "Bite 8 has no outdoor teacher in this data")
+    ns.Changed()
+    bp = ns.Plan("bite")
+    check(bp.target == 8 and bp.alt == 7, ("bite plan, top rank in dungeons only: target %s alt %s"):format(tostring(bp.target), tostring(bp.alt)))
+    check(ns.RankStatus("bite", 8) == S.READY and ns.RankStatus("bite", 7) == S.READY and ns.RankStatus("bite", 6) == S.OBSOLETE,
+        "outdoor alternative rank not READY")
+    for id, c in pairs(hidden) do ns.BEASTS[id].c = c end
+    ns.Changed()
+    check(ns.Plan("bite").alt == nil, "the alternative rank stays after the teachers are back on the map")
+end
 -- restore
 __U.player.level = 30
 ns.db.lookahead = 6
@@ -940,6 +957,29 @@ ns.SetWaypoint(withCoords)
 check(__waypoint ~= nil, "waypoint not set")
 WorldMapFrame:Hide()
 check(ns.highlight == nil, "highlight not cleared when the map closes")
+-- a zone the data has no map id for (Riverglades): the map is found by the area's name in the client,
+-- and the beasts of the zone are drawn on it like anywhere else
+do
+    local river, count = nil, 0
+    for id, b in pairs(ns.BEASTS) do
+        if b.z == "Riverglades" then
+            count = count + 1
+            check(#b.c > 0 and #b.c % 3 == 0, "a Riverglades teacher without habitats: " .. b.en)
+            if not river or id < river then river = id end
+        end
+    end
+    check(count >= 20, "Riverglades teachers in the data: " .. count)
+    check(ns.ZONES.Riverglades.map == nil and ns.ZoneMap("Riverglades") == 2523, "the Riverglades map is not found by the area's name")
+    local onMap = 0
+    for _ in pairs(ns.BeastsByMap()[2523] or {}) do onMap = onMap + 1 end
+    check(onMap == count, ("Riverglades teachers on the zone map: %d of %d"):format(onMap, count))
+    check(ns.OpenMapFor(river) and __map.id == 2523, "a Riverglades beast does not open its zone map")
+    __advance(0.5)
+    check(habitatsShown() == #ns.BEASTS[river].c / 3, "the habitats of a Riverglades beast are not drawn")
+    check(ns.BeastDistance(river, ns.PlayerWorldPos()) ~= nil or select("#", ns.PlayerWorldPos()) == 0,
+        "no distance to a Riverglades beast")
+    WorldMapFrame:Hide()
+end
 slash("map"); slash("map"); slash("help")
 
 -------------------------------------------------------------------------------
@@ -1584,8 +1624,15 @@ do
             local hasOwn = false
             for k in pairs(want) do hasOwn = hasOwn or learners(ability(k)) == 1 end
             check(firstOwn == hasOwn, "the family's own ability is not first: " .. key)
-            -- as of this data: every family but the Bat has exactly one ability of its own
-            check(flagged == (key == "Bat" and 0 or 1), ("own abilities flagged: %d: %s"):format(flagged, key))
+            -- a family's own abilities: the beast-taught ones no other family of the atlas can learn
+            local ownWanted = 0
+            for k in pairs(want) do
+                if learners(ability(k)) == 1 then ownWanted = ownWanted + 1 end
+            end
+            check(flagged == ownWanted, ("own abilities flagged: %d of %d: %s"):format(flagged, ownWanted, key))
+            -- as of this data every family has exactly one; the Bat's is Sonic Blast
+            check(ownWanted == 1, ("own abilities of a family: %d: %s"):format(ownWanted, key))
+            if key == "Bat" then check(got.sonicblast, "the Bat card lacks Sonic Blast") end
             local inAtlas, teachers = 0, 0
             for _, id in ipairs(allPets) do
                 if entry(id).f == key then

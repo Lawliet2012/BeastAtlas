@@ -306,6 +306,13 @@ def main():
                 if (ab["key"], rank) not in n["teaches"]:
                     n["teaches"].append((ab["key"], rank))
     print(f"teaching npcs: {len(npcs)}")
+    # Petopia lists a beast under a rank because the beast knows it; the family list of the ability says
+    # which pets can learn it. The two need not agree (a bat that knows a carrion bird's ability).
+    outside = [f"{n['en']} ({n['family']}): {ab['en']} {rank}"
+               for ab in abilities if "*" not in ab["families"]
+               for rank, r in sorted(ab["ranks"].items())
+               for n in (npcs[i] for i, _, _ in r["npcs"]) if n["family"] not in ab["families"]]
+    print(f"teachers of another family than the ability's ({len(outside)}): {'; '.join(outside)}")
 
     # ---- family icons from Petopia family pages
     families = {}

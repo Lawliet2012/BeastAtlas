@@ -104,7 +104,7 @@ def teachers():
 
 
 def main():
-    pets, icons, no_id, looks_seen, unexpected = {}, {}, [], 0, []
+    pets, icons, no_id, looks_seen, unexpected, unused = {}, {}, [], 0, [], 0
     for slug in family_slugs():
         family, looks = parse_family(fetch(PETOPIA + "family.php?id=" + slug, f"petopia/family_{slug}.html") or "")
         if not family or not looks:
@@ -112,7 +112,14 @@ def main():
         for look in looks:
             looks_seen += 1
             name = re.sub(r"[^A-Za-z0-9_.-]", "_", look)
-            rows = parse_look(fetch(PETOPIA + "look.php?id=" + look, f"petopia/look_{name}.html") or "")
+            page = fetch(PETOPIA + "look.php?id=" + look, f"petopia/look_{name}.html") or ""
+            rows = parse_look(page)
+            if not rows:
+                # a look no creature of this game version wears ("Unused look") or no tameable one
+                # ("Untameable look"); anything else is a row the parser missed
+                if "Unused look" not in page and "Untameable look" not in page:
+                    sys.exit(f"look page {look} ({slug}): no creature rows and not marked unused, the markup has changed")
+                unused += 1
             for r in rows:
                 icons[r["tame"]] = icons.get(r["tame"], 0) + 1
                 if r["tame"] not in TAMEABLE:
@@ -134,7 +141,7 @@ def main():
                     sys.exit(f"npc {r['id']} {r['en']}: listed under {p['f']} and {family}")
                 p["tame"] = p["tame"] or tame
                 p["looks"].append(look)
-    print(f"families: {len(family_slugs())}, looks: {looks_seen}, creatures: {len(pets)}")
+    print(f"families: {len(family_slugs())}, looks: {looks_seen} ({unused} without creatures), creatures: {len(pets)}")
     print(f"tameable icons: {icons}")
     if unexpected:
         sys.exit(f"unexpected rows ({len(unexpected)}): " + "; ".join(unexpected[:30]))
